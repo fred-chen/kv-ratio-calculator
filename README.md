@@ -40,7 +40,7 @@ KV 水位阈值 70%（工程经验阈值）。
 
 ## 官方缓存语义与精度默认（v1.3 / v1.4，重要）
 - **DeepSeek-V4.1-1017**（官方 `inference/model.py`）：KV 仅 4 个源层拥有且**池化压缩**（compress_ratio 2/2/2/1 → 每 token 2.5 条 512 维 latent，rope 内含于 512）；indexer 为 4 份源层共享的 128 维单键（32 个 index 头是查询侧概念，不复制键）；每层 128×512 FP8 滑窗环（含 3 DSpark draft）按每序列常量计。合计 1,600 元素/token + 2.82M/序列（v1.3 前误按 35,072 元素/token，高估 21.9×）。
-- **DeepSeek-V4-Flash-0731**：21 层 ratio=4 + 20 层 ratio=128 交错池化（5.41 条×512/token + 5.25 条×128 indexer），46 层滑窗。
+- **DeepSeek-V4-Flash**（原列作 DeepSeek-V4-Flash-0731 快照，现链接并取数于官方主仓库 deepseek-ai/DeepSeek-V4-Flash，架构与快照完全一致）：21 层 ratio=4 + 20 层 ratio=128 交错池化（5.41 条×512/token + 5.25 条×128 indexer），46 层滑窗。
 - **Kimi-K3 / K3.1-Pro**：69 KDA 线性层 + 24 MLA 全注意力层混合；MLA 576/token；KDA 循环态 116.2M 元素/序列（FP32）。
 - 对标 [kvcache.ai KV Cache Calculator](https://kvcache.ai/tools/kv-cache-size-calculator/)：其 V4.1 "890 B/token @8K" 为官方 FP4 载荷含量化 scale；本工具 FP4 档 = 800 B（不含 scale）+ 滑窗摊销，结构口径一致。
 - **精度默认随模型**：切换模型时权重精度置为原生发布精度（safetensors dtype 桶 + quantization_config 判定，`detect_wdt`）；KV 默认：FP8/FP4 权重模型 → FP8，BF16 模型 → BF16。FP8 注意力+FP4 专家的混合检查点在 FP4 档按 0.5 B/参数统计，低估注意力部分 10~25%。
