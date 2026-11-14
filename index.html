@@ -102,7 +102,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2 × 负荷系数</div></div>
         <div class="f" style="grid-column:1/-1"><label><b>容量负荷口径</b></label>
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <select id="capmode" style="width:auto;min-width:212px;padding:6px 8px;font-size:13.5px"><option value="avg" selected>24h 加权（忙闲折算）</option><option value="peak">忙时峰值（2h 全保留）</option></select>
+            <select id="capmode" style="width:auto;min-width:212px;padding:6px 8px;font-size:13.5px"><option value="avg">24h 加权（忙闲折算）</option><option value="peak" selected>忙时峰值（2h 全保留）</option></select>
             <span class="hint" id="capmodehint" style="margin:0"></span>
           </div>
         </div>
@@ -191,7 +191,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
-    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 08–18 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口容量按「容量负荷口径」计算：选 <b>24h 加权</b> 时乘 24h 加权系数 w（默认，容量按窗口内平均业务负载配置，忙时段实际保留时长约为 窗口×w）；选 <b>忙时峰值</b> 时不做折减（保证忙时段也能完整保留整个窗口）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 08–18 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口容量按「容量负荷口径」计算：选 <b>忙时峰值</b>（<b>默认</b>）时不做折减，保证忙时段也能完整保留整个窗口；选 <b>24h 加权</b> 时乘 24h 加权系数 w，容量按窗口内平均业务负载配置（忙时段实际保留时长约为 窗口×w，属用命中率换成本的取舍）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
@@ -341,7 +341,9 @@ function calc(){
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
-  $("d_cf").textContent = (cf<1 ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）" : "×100%（按忙时峰值）")+"；若改口径，容量差 "+((cf<1?(1/cf-1)*100:0)).toFixed(0)+"%";
+  $("d_cf").textContent = cf<1
+    ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）；改忙时峰值容量 +"+((1/cf-1)*100).toFixed(0)+"%"
+    : "×100%（按忙时峰值）；改 24h 加权容量 −"+((1-wf)*100).toFixed(0)+"%";
   $("capmodehint").textContent = cf<1 ? "忙时实际可保留 ≈ "+(th*cf).toFixed(1)+"h（容量按 24h 平均负载配置）" : "忙时仍完整保留 "+th+"h";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
