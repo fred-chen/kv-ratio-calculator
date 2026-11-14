@@ -82,7 +82,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
         <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="128" step="1" min="1"></div>
-        <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="8192" step="1024" min="1"></div>
+        <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b>（tok/s · 每流）</label><input id="tps" type="number" value="25" step="1" min="1"></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
