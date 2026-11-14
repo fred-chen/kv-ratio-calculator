@@ -45,7 +45,7 @@ KV 水位阈值 70%（报告口径）。顶部提供"载入报告基线"一键�
 - 对标 [kvcache.ai KV Cache Calculator](https://kvcache.ai/tools/kv-cache-size-calculator/)：其 V4.1 "890 B/token @8K" 为官方 FP4 载荷含量化 scale；本工具 FP4 档 = 800 B（不含 scale）+ 滑窗摊销，结构口径一致。
 - **精度默认随模型**：切换模型时权重精度置为原生发布精度（safetensors dtype 桶 + quantization_config 判定，`detect_wdt`）；KV 默认：FP8/FP4 权重模型 → FP8，BF16 模型 → BF16。FP8 注意力+FP4 专家的混合检查点在 FP4 档按 0.5 B/参数统计，低估注意力部分 10~25%。
 - **dec_agg**：decode 聚合吞吐参考 = 350 tok/s/卡 × 实例 GPU 数 × (算力÷2.0)（报告 F2b "32 卡×350" 外推假设，务必实测替换）。
-- 未决：MiMo 滑窗与 MiniMax-M3 MSA 索引语义尚未对照官方实现（当前为保守上界）。
+- **v1.5 全模型对标 kvcache.ai**：DSA/MSA 索引键统一为 **MQA 单键 × 拥有层**（GLM-5.2/5.3、Hy4 → 21×128=2,688/token；MiniMax-M3 → 57×128=7,296；M3.1 → 60×128=7,680；Qwen3.8-Flash-Next → 12×128÷4=384，估计值）；规则以 DeepSeek-V3.2 实测口径验证（61 层全索引 → 42,944 元素/token）。MiMo-V2.6 = **9(10) 全层 + 39(60) 滑窗层**（窗口 8头×(192+128)×128 每序列快照，随 KV 精度）。GLM/M3 两家精确一致；V4 系差异仅为 draft 层窗口开关。
 
 ## 使用
 
