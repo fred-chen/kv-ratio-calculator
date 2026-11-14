@@ -63,15 +63,21 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <main>
   <!-- ============ 输入 ============ -->
   <section>
-    <div class="card"><h2>硬件</h2>
+    <div class="card"><h2>计算节点</h2>
       <div class="grid2">
-        <div class="f"><label><b>GPU 型号</b>（自动填充算力 / 显存）</label><select id="gpu"></select><div class="hint" id="gpuhint">选型号自动填充；也可选「自定义」或直接在下方手动修改。</div></div>
-        <div class="f"><label><b>单 GPU 算力</b>（PFLOPS，稠密·非稀疏）</label><input id="pf" type="number" value="1.2" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
+        <div class="f"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint">选择型号自动填算力/显存；也可「自定义」后手改</div></div>
+        <div class="f"><label><b>单 GPU 算力</b>（PF）</label><input id="pf" type="number" value="1.2" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
         <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
         <div class="f"><label><b>计算节点总数</b></label><input id="nodes" type="number" value="32" step="1" min="1"></div>
       </div>
       <div class="hint" id="gpuhint" style="font-size:13px;color:var(--ink);margin-top:4px"></div>
+    </div>
+    <div class="card"><h2>闪存硬件</h2>
+      <div class="grid2">
+        <div class="f"><label><b>DWPD</b>（满盘写入/天）</label><input id="dwpd" type="number" value="1" step="0.1" min="0.01"><div class="hint">企业级 SSD 写入耐久，常见 1 / 3 / 10</div></div>
+        <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="5" step="1" min="0.1"><div class="hint">由日写入量反推“磨损保底容量”，与保留窗口容量取大</div></div>
+      </div>
     </div>
     <div class="card"><h2>模型与精度</h2>
       <div class="f"><label><b>模型</b>（架构参数取自 HuggingFace config，见页脚）</label><select id="model"></select><div class="hint" id="mnote"></div></div>
@@ -90,14 +96,26 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>decode 目标吞吐</b>（tok/s · 每流）</label><input id="tps" type="number" value="25" step="1" min="1"></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2</div></div>
-        <div class="f"><label><b>繁忙时段窗口</b>（时，0–24）</label><div style="display:flex;gap:6px;align-items:center"><input id="bstart" type="number" value="7" min="0" max="24" step="1" style="flex:1"><span>—</span><input id="bend" type="number" value="18" min="0" max="24" step="1" style="flex:1"></div></div>
-        <div class="f"><label><b>繁忙负荷 / 闲时负荷</b>（% 峰值）</label><div style="display:flex;gap:6px;align-items:center"><input id="bload" type="number" value="100" min="0" max="100" step="5" style="flex:1"><span>/</span><input id="iload" type="number" value="20" min="0" max="100" step="5" style="flex:1"><span>%</span></div></div>
-      </div>
-    </div>
-    <div class="card"><h2>闪存硬件</h2>
-      <div class="grid2">
-        <div class="f"><label><b>DWPD</b>（满盘写入/天）</label><input id="dwpd" type="number" value="1" step="0.1" min="0.01"><div class="hint">企业级 SSD 写入耐久，常见 1 / 3 / 10</div></div>
-        <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="5" step="1" min="0.1"><div class="hint">由日写入量反推“磨损保底容量”，与保留窗口容量取大</div></div>
+        <div class="f" style="grid-column:1/-1;margin-top:2px"><label><b>忙闲分时负荷</b>（% 峰值，用于磨损的 24h 加权）</label>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:13.5px;color:var(--sub)">
+            <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+              <span style="color:var(--ink);font-weight:600">繁忙</span>
+              <input id="bstart" type="number" value="7" min="0" max="24" step="1" style="width:56px;padding:5px 7px;text-align:center">
+              <span>—</span>
+              <input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:56px;padding:5px 7px;text-align:center">
+              <span>时，负荷</span>
+              <input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:56px;padding:5px 7px;text-align:center">
+              <span>%</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+              <span style="color:var(--ink);font-weight:600">闲时</span>
+              <span>（其余时段）负荷</span>
+              <input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:56px;padding:5px 7px;text-align:center">
+              <span>%</span>
+            </div>
+          </div>
+          <div class="hint" id="whint"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -179,7 +197,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）。
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）；「硬件」更名为「计算节点」，闪存硬件卡片紧随其下。
         v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认「自定义」：FP8 稠密 1.2 PF / 144 GB）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
         v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
@@ -293,7 +311,8 @@ function calc(){
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
-  $("d_wf").textContent = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
+  const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
+  $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
   $("d_life").textContent = grid ? lifeTxt+"（DWPD "+dw+"）" : dash;
   $("d_wcap").textContent = grid ? (wcap>cap ? humanGB(wcap)+" —— 磨损主导，选型容量应取此值" : humanGB(wcap)+"（低于保留窗口容量，后者主导）") : dash;
@@ -365,15 +384,15 @@ const GPUS=[
 {const gs=$("gpu");
  GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
  const fill=()=>{const x=GPUS[+gs.value];
-   if(x[1]==null&&x[2]==null){$("gpuhint").textContent=x[4];calc();return;}
+   if(x[1]==null&&x[2]==null){$("gpumodelhint").textContent=x[4];calc();return;}
    const bwv=+$("bw").value;
    $("pf").value=(bwv===1&&x[1]!=null)?x[1]:x[2];
-   $("hbm").value=x[3]; $("gpuhint").textContent=x[4]; calc(); };
+   $("hbm").value=x[3]; $("gpumodelhint").textContent=x[4]; calc(); };
  gs.addEventListener("change",fill);
- const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpuhint").textContent="已改为自定义值。";}};
+ const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
  $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
  $("bw").addEventListener("change",()=>{if(+gs.value>0)fill();});
- gs.value=0; $("gpuhint").textContent="默认自定义：FP8 稠密 1.2 PF / 144 GB；选具体型号将覆盖为厂商标称值。";
+ gs.value=0; $("gpumodelhint").textContent="默认自定义：FP8 稠密 1.2 PF / 144 GB；选具体型号将覆盖为厂商标称值。";
 }
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
 calc();
