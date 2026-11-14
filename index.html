@@ -27,6 +27,9 @@ main{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template
 .hint{font-size:11.5px;color:#8a93a5;margin-top:2px}
 .risk{color:var(--bad);font-weight:800}
 .res-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mini{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:10px;padding:9px 13px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--sub)}
+.mini b{color:var(--ink);font-weight:700;font-size:14.5px;font-variant-numeric:tabular-nums}
+.kpi.big .v{font-size:32px}
 .kpi{background:linear-gradient(160deg,#fff,#faf6f6);border:1px solid #f0dcd9;border-radius:10px;padding:14px;text-align:center}
 .kpi .v{font-size:30px;font-weight:800;color:var(--red);line-height:1.2}
 .kpi .u{font-size:12px;color:var(--sub)}
@@ -129,18 +132,18 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 
   <!-- ============ 结果 ============ -->
   <section>
-    <div class="res-hero">
-      <div class="kpi"><div class="v" id="r_inst">–</div><div class="u">个</div><div class="t">可承载实例数（显存/拓扑口径）</div></div>
-      <div class="kpi"><div class="v" id="r_rack">–</div><div class="u">节点 / 实例</div><div class="t">每实例所需节点</div></div>
+    <div class="res-hero" style="grid-template-columns:1.25fr 1fr 1fr">
+      <div class="kpi big"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t"><b>卸载设备容量需求</b>（保留窗口口径）</div></div>
+      <div class="kpi big"><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div><div class="t"><b>KV 写入带宽</b>（峰值口径）</div></div>
+      <div class="kpi big"><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div><div class="t"><b>KV 读取带宽</b>（峰值口径）</div></div>
     </div>
-    <div class="res-hero" style="margin-top:12px">
-      <div class="kpi"><div class="v" id="r_stok">–</div><div class="u" id="r_stoku"></div><div class="t">单 token KV 缓存（主 KV＋索引；线性状态另计）</div></div>
-      <div class="kpi"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t">卸载设备容量 · 保留窗口制（工作集口径见明细）</div></div>
+    <div class="mini">
+      <div><b id="r_inst">–</b> 个可承载实例</div>
+      <div><b id="r_rack">–</b> 节点 / 实例</div>
+      <div>单 token KV <b id="r_stok">–</b> <span id="r_stoku"></span></div>
     </div>
-    <div class="card" style="margin-top:14px"><h2>卸载设备带宽</h2>
+    <div class="card" style="margin-top:14px"><h2>卸载设备明细（带宽已按峰值口径计入上方）</h2>
       <table><tbody>
-        <tr><td>KV 写入速率（<b>峰值口径</b>：忙时满载，不随忙闲折算）</td><td id="r_wr">–</td></tr>
-        <tr><td>KV 读取带宽（<b>峰值口径</b>：写 × 读放大 1.0）</td><td id="r_rd">–</td></tr>
         <tr><td>每请求 KV 体积 S（平均上下文）</td><td id="r_s">–</td></tr>
         <tr id="row_idx" style="display:none"><td>其中 DSA 索引贡献（token 级状态，随 KV 同精度）</td><td id="r_idx">–</td></tr>
         <tr id="row_state" style="display:none"><td>循环态 / 滑窗快照（每序列）</td><td id="d_state">–</td></tr>
@@ -207,7 +210,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）；「硬件」更名为「计算节点」，闪存硬件卡片紧随其下。
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）；「硬件」更名为「计算节点」，闪存硬件卡片紧随其下；首屏以**容量需求 / KV 写带宽 / KV 读带宽**三大 KPI 突出呈现，实例数、每实例节点数、单 token KV 降为小字条。
         v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认「自定义」：FP8 稠密 1.2 PF / 144 GB）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
         v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
@@ -309,8 +312,9 @@ function calc(){
   $("r_cap").textContent = capFinal>=1000?(capFinal/1000).toLocaleString("zh",{maximumFractionDigits:1}):capFinal.toLocaleString("zh",{maximumFractionDigits:0});
   const lifeSpan = (isFinite(lifeY)&&lifeY<riskY) ? '<span class="risk">≈'+lifeTxt+'</span>' : "≈"+lifeTxt;
   $("r_capu").innerHTML = (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b>":"保留窗口 "+th+"h"+(cf<1?" × 负荷 "+(100*cf).toFixed(0)+"%":"（峰值）")+" 口径")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
-  $("r_wr").textContent = wr.toLocaleString("zh",{maximumFractionDigits:1})+" GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）";
-  $("r_rd").textContent = rd.toLocaleString("zh",{maximumFractionDigits:1})+" GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）";
+  const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
+  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）";
+  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）";
   $("r_s").textContent = humanGB(S_GB);
   if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
   else $("row_idx").style.display="none";
