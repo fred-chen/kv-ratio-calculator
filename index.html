@@ -57,7 +57,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <body>
 <header>
   <h1>KV 卸载与实例规模计算器 <span class="badge" style="color:#ffd;border-color:#ffd">简化版</span></h1>
-  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 容量双口径（保留窗口制 ｜ 在途工作集制）· v1.7</p>
+  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 容量双口径（保留窗口制 ｜ 在途工作集制）· v1.8</p>
 </header>
 
 <main>
@@ -65,6 +65,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <section>
     <div class="card"><h2>硬件</h2>
       <div class="grid2">
+        <div class="f"><label><b>GPU 型号</b>（自动填充算力 / 显存）</label><select id="gpu"></select><div class="hint" id="gpuhint">选型号自动填充；也可选「自定义」或直接在下方手动修改。</div></div>
         <div class="f"><label><b>单 GPU 算力</b>（PFLOPS，稠密·非稀疏）</label><input id="pf" type="number" value="2.0" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
         <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
@@ -144,6 +145,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
+    <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
@@ -164,7 +166,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
+        v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
 </div>
 
@@ -315,6 +318,35 @@ MODELS.forEach(m=>{
   tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${arch}${note}</td><td>${m.W.toLocaleString()} B</td><td>${m.wdt==="nvfp4"?"FP4":m.wdt.toUpperCase()}</td><td title="${m.psrc}">${m.Pe?"~":""}${m.P} B</td><td>${(m.et+(m.idx||0)).toLocaleString()}${m.idx?"（索引 "+m.idx.toLocaleString()+"）":""}</td><td>${m.es?(m.es.toLocaleString()+(m.ws?" + 窗":"")):(m.ws?("窗 "+m.ws.toLocaleString()):"–")}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
   $("mdb").appendChild(tr);
 });
+const GPUS=[
+ ["自定义（手动输入）",null,null,null,"直接手动填写下方算力 / 显存。"],
+ ["NVIDIA A100 SXM 80G",null,0.312,80,"BF16/FP16 稠密 312 TF（Ampere 无 FP8 Tensor 核心）"],
+ ["NVIDIA A800 SXM 80G",null,0.312,80,"与 A100 同芯（312 TF BF16），仅 NVLink 600→400 GB/s"],
+ ["NVIDIA H20",0.296,0.148,96,"FP8 稠密 296 / BF16 148 TF，96GB HBM3 4TB/s（显存偏科型）"],
+ ["NVIDIA H800 SXM",1.979,0.989,80,"算力与 H100 相同（标称 FP8 3958 含稀疏→稠密 1979），NVLink 砍至 400 GB/s"],
+ ["NVIDIA H100 SXM",1.979,0.989,80,"FP8 稠密 1979 TF（data sheet 头条 1979 为 FP16 稀疏值，取数需÷2 换算稠密）"],
+ ["NVIDIA H200",1.979,0.989,141,"与 H100 同芯，HBM3e 141GB / 4.8TB/s"],
+ ["NVIDIA B100",3.5,1.75,192,"FP8 7 PF 为稀疏口径 → 稠密 3.5 PF；192GB HBM3e"],
+ ["NVIDIA B200",4.5,2.25,192,"FP8 稠密 4.5 PF / FP4 9 PF，192GB HBM3e 8TB/s"],
+ ["NVIDIA B300",4.5,2.25,288,"FP8 稠密与 B200 同为 4.5 PF，FP4 提至 1.5×；288GB"],
+ ["摩尔线程 MTT S4000",null,0.128,48,"官方支持至 BF16/INT8（无 FP8）；BF16 128 TF / INT8 256 TOPS"],
+ ["摩尔线程 MTT S5000",1.0,0.5,80,"FP8 1000 TF（2026-02 官方公开），80GB；BF16 按半率估 500"],
+ ["海光 BW1000（深算三号）",null,0.48,64,"FP16 480 TF（部署文档口径，官方未直接公布）；BW1000_H 低配档 130 TF"],
+ ["海光 BW1100",0.26,0.13,144,"144GB HBM3e 模组卡、原生 FP8；算力官方未公布，按 2026 白皮书配置表 FP8≈260 / FP16≈130 TF"],
+];
+{const gs=$("gpu");
+ GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
+ const fill=()=>{const x=GPUS[+gs.value];
+   if(x[1]==null&&x[2]==null){$("gpuhint").textContent=x[4];calc();return;}
+   const bwv=num("bw",1);
+   $("pf").value=(bwv===1&&x[1]!=null)?x[1]:x[2];
+   $("hbm").value=x[3]; $("gpuhint").textContent=x[4]; calc(); };
+ gs.addEventListener("change",fill);
+ const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpuhint").textContent="已改为自定义值。";}};
+ $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
+ $("bw").addEventListener("change",()=>{if(+gs.value>0)fill();});
+ gs.value=0; $("gpuhint").textContent="选型号自动填充；也可选「自定义」或直接在下方手动修改。";
+}
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
 calc();
 </script>
