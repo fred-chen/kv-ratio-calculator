@@ -245,8 +245,7 @@ function applyModelDefaults(){ const m=MODELS[+sel.value];
   $("bw").value = m.wdt==="bf16" ? "2" : m.wdt==="fp8" ? "1" : "0.5";
   $("bk").value = m.wdt==="bf16" ? "2" : "1"; }   // 用户规则：FP8/FP4 权重 → KV FP8；否则 BF16
 sel.addEventListener("change",()=>{ applyModelDefaults(); syncPf(); calc(); });
-applyModelDefaults();
-$("bw").value="1"; $("bk").value="1";   // 默认按 FP8 口径（算力框默认即 FP8 稠密）
+applyModelDefaults();   // 初始状态 = 默认模型的原生精度，与「切走再切回」完全一致
 showPfBadge();
 
 const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5, DWPD_YEARS=5;   // DWPD 的保修期基准（年）   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
@@ -454,8 +453,8 @@ const GPUS=[
  const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
  $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
  $("bw").addEventListener("change",()=>{ if(+gs.value>0){fill();} else {syncPf();} showPfBadge(); calc(); });
- gs.value=0; $("gpumodelhint").textContent="默认自定义：FP8 稠密 1.2 PF / 144 GB；选具体型号将覆盖为厂商标称值。";
- showPfBadge();
+ gs.value=0; $("gpumodelhint").textContent="默认自定义；选具体型号将覆盖为厂商标称值。";
+ syncPf(); showPfBadge();   // 初始化即把算力换算到默认模型的原生精度档，保证与「切走再切回」一致
 }
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
 calc();
