@@ -204,7 +204,7 @@ function calc(){
     if(!cands.length) continue;
     const pref=cands.filter(t=>t<=tpMax), pool=pref.length?pref:cands;
     pool.sort((a,b)=>{const xa=a<=g,xb=b<=g; if(xa!==xb)return xa?-1:1; return xa?b-a:a-b;});
-    const ppOk=pool.filter(t=>N/t<=8), tryPool=ppOk.length?ppOk:pool;
+    const ppOk=pool.filter(t=>N/t<=8), rest=pool.filter(t=>!ppOk.includes(t)), tryPool=ppOk.concat(rest);
     for(const t of tryPool){
       const r=repOf(t);
       if(Math.ceil((Weff + r*infl*S_GB)/budNode) <= n){ grid=[t,N/t]; nInst=n; rep=r; break outer; }
