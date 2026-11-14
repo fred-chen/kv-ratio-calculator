@@ -57,7 +57,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <body>
 <header>
   <h1>KV 卸载与实例规模计算器 <span class="badge" style="color:#ffd;border-color:#ffd">简化版</span></h1>
-  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 口径对齐《联想超节点存储与计算柜配比估算报告》v0.12</p>
+  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 计算链/校核对齐报告 v0.12 · 容量双口径并列（保留窗口制 ｜ 报告 F5 在途工作集）· v1.1</p>
 </header>
 
 <main>
@@ -79,6 +79,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16（2 B/元素）</option><option value="1" selected>FP8（1 B/元素）</option><option value="0.5">INT4（0.5 B/元素）</option></select></div>
       </div>
       <label class="chk"><input type="checkbox" id="pd"> PD 分离（Prefill / Decode 分离部署，权重双副本）</label>
+      <div class="hint" style="margin-top:4px"><a href="#" id="preset" style="color:var(--red);font-weight:600;text-decoration:none">↺ 一键载入报告基线（Qwen3.8 · FP8 权重 · BF16 KV · 8K · 128 在途 · 32 节点）</a></div>
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
@@ -99,7 +100,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <div class="kpi"><div class="v" id="r_rack">–</div><div class="u">节点 / 实例</div><div class="t">每实例所需节点</div></div>
     </div>
     <div class="res-hero" style="margin-top:12px">
-      <div class="kpi"><div class="v" id="r_stok">–</div><div class="u" id="r_stoku"></div><div class="t">单 token KV（含线性状态折算）</div></div>
+      <div class="kpi"><div class="v" id="r_stok">–</div><div class="u" id="r_stoku"></div><div class="t">单 token KV 缓存（主 KV＋索引；线性状态另计）</div></div>
       <div class="kpi"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t">卸载设备所需容量</div></div>
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备带宽</h2>
@@ -123,7 +124,10 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>在途 KV 显存占用（水位）</td><td id="d_lv">–</td></tr>
         <tr><td>Prefill 时长（每请求）</td><td id="d_pf">–</td></tr>
         <tr><td>单请求服务时长（prefill + decode）</td><td id="d_svc">–</td></tr>
-        <tr><td>算力利用率（prefill+decode 合计）</td><td id="d_util">–</td></tr>
+        <tr><td>prefill 算力占用（按可持续流量）</td><td id="d_pfutil">–</td></tr>
+        <tr><td>decode 吞吐占用（÷ 参考聚合 dec_agg）</td><td id="d_decutil">–</td></tr>
+        <tr><td>算力可持续在途 / 实例</td><td id="d_inflmax">–</td></tr>
+        <tr><td>报告 F5 口径容量（在途工作集 ×1.2）</td><td id="d_f5">–</td></tr>
       </tbody></table>
       <details><summary>本页面用到的公式</summary><div id="f_show" style="color:var(--sub);padding-top:6px"></div></details>
     </div>
@@ -139,23 +143,29 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
+    <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
+    <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
+    <b>decode 聚合吞吐参考 dec_agg = 11,200 × (算力÷2) tok/s</b>：decode 是访存受限而非算力受限，无法由 PFLOPS 精确推得；以报告 F2b 的 H100×8 实测 11,200 tok/s（Qwen3.8）为锚按算力线性缩放，属粗略参考，务必以实测替换。<br>
+    <b>KV 水位阈值 70%</b>：沿用报告 §2.6"超过 70% 优先扩容"口径。<br>
+    <b>容量单位口径</b>：本页面 GB/TB 均为 10⁹/10¹² 字节（与报告一致）；厂商标称显存若按 GiB 计，结果偏保守约 7%。<br>
+    <b>DSv4.1-Flash 的每层 KV 维</b>：config 无 kv_lora_rank，按 head_dim+qk_rope（512+64）兜底，若其 512 已含 rope 则高估 11%。<br>
     <b>前缀去重率 = 0</b>：保守口径——每个请求独立存储自己的 KV，不依赖跨请求前缀共享收益。<br>
     <b>线性注意力状态按 FP32</b>：混合模型的循环状态（如 Gated DeltaNet 的矩阵状态）对量化敏感，即使 KV 选了 FP8/INT4，该部分仍按 4 B/元素计。<br>
-    <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。</p>
+    <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项按报告 F2 口径（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×——页面与报告同口径、TTFT 校核同等乐观，跨文档可比优先于绝对精确。</p>
     <h3>计算链</h3>
     <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
-    到达率 = 实例数×在途 ÷ 单请求服务时长；写带宽 = 到达率×单请求KV；容量 = 写带宽×保留窗口×1.2。</p>
+    到达率 = 实例数×在途 ÷ 单请求服务时长；写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>报告 F5 工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，与报告可比）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
     <h3>模型库（13 款，点开看架构）</h3>
     <details><summary>展开模型数据库</summary>
-      <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>激活参数</th><th>KV 元素/token</th><th>循环状态 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
+      <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>循环状态 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 简化 · 2026-11 · 单页无后端，数据不出浏览器</p>
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 计算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.1（2026-11-14）：审计修订——TP KV 复制入显存核算；prefill/decode 占用拆分（dec_agg 参考）；单 token KV 计入 DSA 索引；TP×PP 搜索纳入复制系数一致性（单趟搜索）；容量双口径并列（保留窗口 / 报告 F5）；DSv4.1 每层维 576 兜底；输入守卫与诊断文案修正；水位阈值 70%；GPU 总数显示。</p>
   </div>
 </div>
 
 <script>
-const MODELS = [{"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 2048, "es": 0, "idx": 32768, "W": 763.2, "P": 20.8, "Pe": true, "dm": 5120, "td": 51.2, "ctx": 1048576, "note": "MLA×40，KV 仅 4 层源出，DSA 索引 32,768 元素/token 已计"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 4096, "W": 753.3, "P": 40.8, "Pe": true, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 4096, "W": 753.3, "P": 40.8, "Pe": true, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "W": 298.8, "P": 21, "Pe": false, "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 4096, "W": 780.0, "P": 49, "Pe": false, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "mla", "L": 93, "Lf": 93, "Ll": 0, "nq": 96, "nkv": 96, "et": 53568, "es": 0, "idx": 0, "W": 2779.9, "P": 104, "Pe": false, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "MLA×93"}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "mla", "L": 93, "Lf": 93, "Ll": 0, "nq": 96, "nkv": 96, "et": 53568, "es": 0, "idx": 0, "W": 2780.1, "P": 104, "Pe": false, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "MLA×93"}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "W": 310.8, "P": 16.0, "Pe": true, "dm": 4096, "td": 1280.0, "ctx": 1048576, "note": "GQA（k192/v128），另有 128 token 滑窗（未折减，保守）"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 179200, "es": 0, "idx": 0, "W": 1024.2, "P": 42.1, "Pe": true, "dm": 6144, "td": 2560.0, "ctx": 1048576, "note": "GQA（k192/v128），另有 128 token 滑窗（未折减，保守）"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "W": 427.0, "P": 23, "Pe": false, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "W": 220.5, "P": 12, "Pe": true, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "W": 2446.2, "P": 95, "Pe": false, "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 512, "W": 180.0, "P": 6, "Pe": false, "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}];
+const MODELS = [{"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 2304, "es": 0, "idx": 32768, "dkv": 576, "W": 763.2, "P": 20.8, "Pe": true, "psrc": "config 估算", "dm": 5120, "td": 57.6, "ctx": 1048576, "note": "MLA×40，KV 仅 4 层源出，DSA 索引 32,768 元素/token 已计"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 4096, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 4096, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "dkv": 1024, "W": 298.8, "P": 21, "Pe": false, "psrc": "模型卡 295B/A21B", "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 4096, "dkv": 576, "W": 780.0, "P": 49, "Pe": false, "psrc": "模型卡 770B/A49B", "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "mla", "L": 93, "Lf": 93, "Ll": 0, "nq": 96, "nkv": 96, "et": 53568, "es": 0, "idx": 0, "dkv": 576, "W": 2779.9, "P": 104, "Pe": false, "psrc": "模型卡 Activated 104B", "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "MLA×93"}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "mla", "L": 93, "Lf": 93, "Ll": 0, "nq": 96, "nkv": 96, "et": 53568, "es": 0, "idx": 0, "dkv": 576, "W": 2780.1, "P": 104, "Pe": false, "psrc": "模型卡（同 K3）", "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "MLA×93"}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "dkv": 768, "W": 310.8, "P": 16.0, "Pe": true, "psrc": "config 估算", "dm": 4096, "td": 1280.0, "ctx": 1048576, "note": "GQA（k192/v128），另有 128 token 滑窗（未折减，保守）"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 179200, "es": 0, "idx": 0, "dkv": 1536, "W": 1024.2, "P": 42.1, "Pe": true, "psrc": "config 估算", "dm": 6144, "td": 2560.0, "ctx": 1048576, "note": "GQA（k192/v128），另有 128 token 滑窗（未折减，保守）"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "dkv": 512, "W": 427.0, "P": 23, "Pe": false, "psrc": "模型卡 ~428B/A23B", "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 0, "dkv": 512, "W": 220.5, "P": 12, "Pe": true, "psrc": "按 M3 比例估算", "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "dkv": 1024, "W": 2446.2, "P": 95, "Pe": false, "psrc": "模型卡 A95B", "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 512, "dkv": 512, "W": 180.0, "P": 6, "Pe": false, "psrc": "模型卡 125B/A6B", "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}];
 
 const $ = id => document.getElementById(id);
 const sel = $("model");
@@ -163,62 +173,68 @@ MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.text
 sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
 
 const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0;
-const fmt=(x,u,d=1)=>{if(!isFinite(x))return "–";const p=x.toExponential(0);if(Math.abs(x)>=1e6&&u==="B"){return (x/1e3).toLocaleString("zh",{maximumFractionDigits:0})+" GB";}return x.toLocaleString("zh",{maximumFractionDigits:d})+" "+u;};
 const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:0})+" MB";
 
 function calc(){
-  const m=MODELS[+sel.value], pf=+$("pf").value||2, hbm=+$("hbm").value||1, g=+$("g").value||8,
-        nodes=+$("nodes").value||1, bw=+$("bw").value, bk=+$("bk").value, pd=$("pd").checked,
-        infl=+$("inflight").value||1, ctx=+$("ctx").value||1, nout=+$("nout").value||512,
-        tps=+$("tps").value||1, ttft=+$("ttft").value||500, th=+$("thold").value||2;
-  $("mnote").textContent = m.note + " · 最大上下文 " + (m.ctx?m.ctx.toLocaleString():"–") + " · 激活参数 " + m.P + "B" + (m.Pe?"（估算）":"");
+  // —— 输入解析与守卫（P2-2）——
+  const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
+  const m=MODELS[+sel.value], pf=Math.max(0.05,num("pf",2)), hbm=Math.max(1,num("hbm",144)),
+        g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
+        bw=+$("bw").value||1, bk=+$("bk").value||2, pd=$("pd").checked,
+        infl=Math.max(1,Math.round(num("inflight",128))), ctx=Math.max(1,Math.round(num("ctx",65536))),
+        nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",25)),
+        ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2));
+  $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"）";
   $("pfhint").textContent = {2:"请按 BF16/FP16 稠密峰值填写（如 H100/H200 ≈ 1.0 PF/卡）",1:"请按 FP8 稠密峰值填写（如 H100/H200 ≈ 2.0 PF/卡，即 H100 标称 1979 TFLOPS）",0.5:"INT4 weight-only 量化实际以 BF16 算力跑矩阵乘 → 请填 BF16 稠密峰值；W4A8/W4A4 才填 INT8/FP4 档"}[bw];
-  
-  // KV
-  const sTokB = (m.et + (m.idx||0))*bk;                     // B/token：主 KV + DSA 索引（随精度）
-  const stateB = m.es*4;                                   // B/序列，固定 FP32
-  const S_GB = (sTokB*ctx + stateB)/1e9;                   // 单请求 KV GB
-  // 权重
-  const W_GB = m.W*1e9*bw/1e9;                             // = m.W*bw (GB, 10^9)
-  const Weff = W_GB*(pd?2:1);
-  const budNode = g*hbm*UTIL;                              // 每节点可用显存 GB
-  const nMem = Math.ceil((Weff + infl*S_GB)/budNode);      // 显存容量下限
-  let nInst = 0, grid = null;                              // TP×PP 合法性搜索（TP|注意力头&hidden，PP|层数）
-  const nMax = Math.min(Math.max(nMem, nodes), 128);
-  for(let n=nMem; !grid && n<=nMax; n++){
-    const N = n*g, cands = [];
-    for(let t=1; t<=Math.min(m.nq, N); t++){
-      if(m.nq%t || m.dm%t || N%t) continue;
-      if(m.L%(N/t)===0) cands.push(t);
-    }
-    if(cands.length){
-      cands.sort((a,b)=>{ const xa=a<=g, xb=b<=g;
-        if(xa!==xb) return xa?-1:1;        // ① 节点内 TP 优先
-        return xa ? b-a : a-b; });          // ② 节点内取最大 t；跨节点取最小 t
-      grid = [cands[0], N/cands[0]]; nInst = n;
+
+  // —— KV：主 KV + DSA 索引（每 token，随 KV 精度）+ 线性状态（每序列，FP32）——
+  const sTokB=(m.et+(m.idx||0))*bk, stateB=m.es*4;
+  const S_GB=(sTokB*ctx+stateB)/1e9;
+  const W_GB=m.W*bw, Weff=W_GB*(pd?2:1), budNode=g*hbm*UTIL;
+
+  // —— TP 复制（P0-2/P2-3）：GQA 在 TP>KV头 时复制；MLA latent 按 TP 整份复制（vLLM/SGLang 行为）——
+  const kvHeads = m.cls==="mla" ? 1 : Math.max(1,m.nkv||1);
+  const repOf = tp => Math.max(1, Math.ceil(tp/kvHeads));
+  const tpMax = Math.max(16,g);
+  let nInst=0, grid=null, rep=1, nHi=Math.max(nodes,512);
+  outer: for(let n=1;n<=nHi;n++){
+    const N=n*g, cands=[];
+    for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) cands.push(t); }
+    if(!cands.length) continue;
+    const pref=cands.filter(t=>t<=tpMax), pool=pref.length?pref:cands;
+    pool.sort((a,b)=>{const xa=a<=g,xb=b<=g; if(xa!==xb)return xa?-1:1; return xa?b-a:a-b;});
+    for(const t of pool){
+      const r=repOf(t);
+      if(Math.ceil((Weff + r*infl*S_GB)/budNode) <= n){ grid=[t,N/t]; nInst=n; rep=r; break outer; }
     }
   }
-  if(!grid) nInst = nMem;
-  let inst = grid ? Math.floor(nodes/nInst) : 0;           // 可承载实例数
-  const budInst = nInst*budNode - Weff;                    // 实例 KV 预算
-  // 时延与算力
-  const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+m.td)*ctx*ctx;     // prefill FLOPs/req
-  const Tpf = fl/(nInst*g*pf*1e15*MFU);
-  const Tsvc = Tpf + nout/tps;
-  const lamInst = infl/Tsvc, lam = inst*lamInst;           // req/s
-  const wr = lam*S_GB, rd = wr*RAMPL;                      // GB/s
-  const cap = wr*th*3600*RED;                              // GB
-  const util = (infl*tps*2*m.P*1e9 + lamInst*fl)/(nInst*g*pf*1e15*MFU);
+  const inst = grid ? Math.floor(nodes/nInst) : 0;
+  const nMemEff = Math.ceil((Weff + (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB)/budNode);
+  const budInst = nInst*budNode - Weff;
+  const kvFoot = (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB;   // 实例显存 KV 足迹（含复制）
 
-  // 输出
+  // —— 时延与算力（prefill 二次项沿报告 F2：d_kv 取 K 侧；与报告同为不乘 2×MAC 的口径）——
+  const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const Ccap = Math.max(1,nInst)*g*pf*1e15*MFU;
+  const Tpf = fl/Ccap, Tsvc = Tpf + nout/tps;
+  const lamInst = infl/Tsvc, lam = inst*lamInst;
+  const wr = lam*S_GB, rd = wr*RAMPL, cap = wr*th*3600*RED;   // 保留窗口口径（用户选型）
+  const capF5 = inst*infl*S_GB*RED;                            // 报告 F5：在途工作集×1.2
+  const pfUtil = lamInst*Tpf;                                  // prefill 算力占用（可持续流量）
+  const decAgg = 11200*(pf/2.0);                               // decode 聚合吞吐参考（线性缩放自 H100×8 实测 11,200 tok/s）
+  const decUtil = infl*tps/decAgg;
+  const inflMax = Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
+
+  // —— 输出 ——
   $("r_inst").textContent = inst;
-  $("r_rack").textContent = nInst>nodes ? "装不下" : nInst;
-  $("r_stok").textContent = (m.et*bk/1e6).toLocaleString("zh",{maximumFractionDigits:4});
-  $("r_stoku").textContent = "MB/token（单请求 "+humanGB(S_GB)+"）";
+  $("r_rack").textContent = grid ? nInst : "–";
+  const sTokMB = sTokB/1e6;
+  if(sTokMB>=0.01){ $("r_stok").textContent=sTokMB.toLocaleString("zh",{maximumFractionDigits:4}); $("r_stoku").textContent="MB/token（单请求 "+humanGB(S_GB)+"）"; }
+  else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
   $("r_cap").textContent = cap>=1000?(cap/1000).toLocaleString("zh",{maximumFractionDigits:1}):cap.toLocaleString("zh",{maximumFractionDigits:0});
-  $("r_capu").textContent = cap>=1000?"TB（窗口 "+th+"h ×1.2）":"GB";
+  $("r_capu").textContent = (cap>=1000?"TB":"GB")+"（保留窗口 "+th+"h 口径；报告 F5 口径 "+humanGB(capF5)+" 见明细）";
   $("r_wr").textContent = wr.toLocaleString("zh",{maximumFractionDigits:1})+" GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）";
-  $("r_rd").textContent = rd.toLocaleString("zh",{maximumFractionDigits:1})+" GB/s";
+  $("r_rd").textContent = rd.toLocaleString("zh",{maximumFractionDigits:1})+" GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）";
   $("r_s").textContent = humanGB(S_GB);
   if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
   else $("row_idx").style.display="none";
@@ -228,34 +244,56 @@ function calc(){
   const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
   $("gpuhint").textContent = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = " + totGPU.toLocaleString() + " 卡";
   $("d_gpu").textContent = grid ? (totGPU.toLocaleString() + " 卡 = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : totGPU.toLocaleString() + " 卡（无法部署实例）";
-  $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（显存下限 "+nMem+" 节点"+(nInst>nMem?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
-  $("d_lv").textContent = budInst>0 ? (100*infl*S_GB/budInst).toFixed(0)+"%" : "超出显存";
+  $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
+  $("d_lv").textContent = budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× TP 复制）":"") : "超出显存";
   $("d_pf").textContent = (Tpf*1000).toFixed(0)+" ms";
   $("d_svc").textContent = Tsvc.toFixed(2)+" s";
-  $("d_util").textContent = (100*util).toFixed(0)+"%";
+  $("d_pfutil").textContent = (100*pfUtil).toFixed(0)+"%";
+  $("d_decutil").textContent = (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）";
+  $("d_inflmax").textContent = inflMax.toLocaleString()+" / 实例（目标 "+infl+"）";
+  $("d_f5").textContent = humanGB(capF5);
   $("f_show").innerHTML =
-    "本例：权重 "+humanGB(Weff)+" + 在途KV "+infl+"×"+humanGB(S_GB)+" → 显存下限 "+nMem+" 节点"+(grid?" → 并行合法化 TP"+grid[0]+"×PP"+grid[1]+" 取 "+nInst+" 节点":"（无合法并行网格）")+"；"+
-    "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+(m.dm)+"+"+m.td+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
-    "到达率 = "+inst+"×"+infl+"/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s";
+    "本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"（TP"+(grid?grid[0]:"?")+" 复制）→ 复制后显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
+    "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
+    "到达率 = "+inst+"×"+infl+"/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 "+decAgg.toFixed(0)+" tok/s";
 
+  // —— 校核 ——
   const chk=[];
-  if(!grid) chk.push({c:"bad",t:"显存下限 "+nMem+" 至 "+nMax+" 节点均无合法并行组合：TP 须整除 "+m.nq+" 个注意力头、PP 须整除 "+m.L+" 层（如 92 层 = 4×23，3/5/6/7 节点不可行），需更多节点或换并行策略"});
-  else if(nInst>nMem) chk.push({c:"warn",t:"显存只需 "+nMem+" 节点，但 TP×PP 整除不满足，已上调至 "+nInst+" 节点（TP"+grid[0]+"×PP"+grid[1]+"）"});
-  if(grid && inst>=1) chk.push({c:"ok",t:"全节点可部署 "+inst+" 个实例（每实例 "+nInst+" 节点，TP"+grid[0]+"×PP"+grid[1]+"）"});
-  else if(grid) chk.push({c:"bad",t:"最小合法实例需 "+nInst+" 节点 > 总节点 "+nodes+"：加节点 / 降在途 / 降权重位宽 / 减上下文"});
-  if(grid && m.nkv && grid[0]>m.nkv) chk.push({c:"warn",t:"TP"+grid[0]+" > KV 头数 "+m.nkv+"：KV 头在卡间复制 "+(grid[0]/m.nkv)+" 份（推理框架标准行为）；卸载容量与带宽按单份计"});
-  chk.push(ctx<=m.ctx?{c:"ok",t:"平均上下文 "+ctx.toLocaleString()+" ≤ 模型上限 "+m.ctx.toLocaleString()}:{c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超过模型上限，结果仅供参考"});
-  if(Tpf*1000<=ttft) chk.push({c:"ok",t:"Prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms"});
-  else chk.push({c:"warn",t:"Prefill "+(Tpf*1000).toFixed(0)+" ms 超出 TTFT 目标 "+ttft+" ms：增加每实例节点数或降低上下文/在途（可对比 ⌈×2 节点⌉ 方案）"});
-  chk.push(util<=1?{c:"ok",t:"算力利用率 "+(100*util).toFixed(0)+"% ≤ 100%（decode "+tps+" tok/s×"+infl+" 流 + prefill）"}:{c:"bad",t:"算力不足："+(100*util).toFixed(0)+"% > 100%：decode/请求密度超出 "+nInst+" 节点算力，减少在途或增节点"});
-  if(budInst>0){const lv=100*infl*S_GB/budInst; chk.push(lv<=85?{c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 85%"}:{c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% 偏高，建议降在途或加节点"});}
-  else chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
-  if(pd) chk.push({c:"warn",t:"PD 分离已按权重×2 计（P/D 各驻留一份）；其收益（prefill 不再打断 decode 的 tps）未折入算力校核，实际可再放宽"});
+  if(!grid){
+    chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+复制 KV），当前仅 "+nodes+" 节点"
+      : "至 "+nHi+" 节点无合法 TP×PP 且显存可行组合：TP 须整除 "+m.nq+" 头与 "+m.dm+" 宽、PP 须整除 "+m.L+" 层、TP≤"+tpMax+"（可试降在途/上下文/位宽，或加节点）"});
+  }else{
+    if(nInst>nMemEff) chk.push({c:"warn",t:"显存只需 "+nMemEff+" 节点，但 TP×PP 整除不满足，已上调至 "+nInst+" 节点（TP"+grid[0]+"×PP"+grid[1]+"）"});
+    if(inst>=1) chk.push({c:"ok",t:"显存口径可部署 "+inst+" 个实例（每实例 "+nInst+" 节点，TP"+grid[0]+"×PP"+grid[1]+(rep>1?"，KV 每实例复制 ×"+rep:"")+"）"});
+    else chk.push({c:"bad",t:"最小合法实例 "+nInst+" 节点 > 总节点 "+nodes+"：加节点 / 降在途 / 降权重位宽 / 减上下文"});
+    if(grid[0]>g) chk.push({c:"warn",t:"TP"+grid[0]+" 跨 "+(grid[0]/g)+" 节点（超出单机 NVLink 域），依赖高速跨机张量并行"});
+    if(grid[1]>8) chk.push({c:"warn",t:"PP"+grid[1]+" 段数偏多：单请求穿越 "+grid[1]+" 段流水线，调度与尾延迟需实测评估（或考虑 EP/DP 拓扑）"});
+  }
+  if(m.ctx && ctx>m.ctx) chk.push({c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超模型上限 "+m.ctx.toLocaleString()+"，结果仅供参考"});
+  chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
+                          : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
+  chk.push(pfUtil<=1 ? {c:"ok",t:"prefill 算力占用 "+(100*pfUtil).toFixed(0)+"%（到达率 "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
+                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"（目标 "+infl+"），建议降在途 / 加节点"});
+  chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toFixed(0)+" tok/s）"}
+                     : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
+  if(budInst>0){const lv=100*kvFoot/budInst;
+    chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制）":"")}
+                              : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（报告扩容阈值）"+(rep>1?"，含 "+rep+"× 复制":"")+"：建议降在途或加节点"})
+                     : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
+  else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
+  if(pd) chk.push({c:"warn",t:"PD 分离按权重×2 建模；其 decode 隔离收益未折入（实际 tps 上限可更高）"});
   $("r_chk").innerHTML = chk.map(x=>`<li class="${x.c}">${x.t}</li>`).join("");
 }
+$("preset").addEventListener("click",e=>{ e.preventDefault();
+  $("model").value = MODELS.findIndex(x=>x.n==="Qwen3.8-2.4T-A95B"); $("pf").value=2; $("hbm").value=144; $("g").value=8; $("nodes").value=32;
+  $("bw").value="1"; $("bk").value="2"; $("inflight").value=128; $("ctx").value=8192; $("nout").value=512;
+  $("tps").value=25; $("ttft").value=500; $("thold").value=2; $("pd").checked=false; calc(); });
+
 MODELS.forEach(m=>{
   const tr=document.createElement("tr");
-  tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${m.cls==="hybrid"?`混合（${m.Lf} 全注意力 + ${m.Ll} 线性）`:m.cls==="mla"?`MLA ×${m.L}`:`GQA ×${m.L}`}（${m.note}）</td><td>${m.W.toLocaleString()} B</td><td>${m.Pe?"~":""}${m.P} B</td><td>${m.et.toLocaleString()}</td><td>${m.es?m.es.toLocaleString():"–"}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
+  const arch=m.cls==="hybrid"?`混合 ${m.Lf}+${m.Ll}`:m.cls==="mla"?`MLA ×${m.L}`:`GQA ×${m.L}`;
+  const note=(m.note.replace(/\s/g,"")===arch.replace(/\s/g,""))?"":m.note;
+  tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${arch}${note?"（"+note+"）":""}</td><td>${m.W.toLocaleString()} B</td><td title="${m.psrc}">${m.Pe?"~":""}${m.P} B</td><td>${(m.et+(m.idx||0)).toLocaleString()}${m.idx?"（索引 "+m.idx.toLocaleString()+"）":""}</td><td>${m.es?m.es.toLocaleString():"–"}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
   $("mdb").appendChild(tr);
 });
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
