@@ -268,7 +268,11 @@ function calc(){
         bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100,
         capMode=$("capmode").value;
   $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
-  $("pfhint").textContent = {2:"单位 PF（=1000 TFLOPS/卡）· 请按 BF16/FP16 稠密峰值填写（如 H100/H200 ≈ 1.0 PF）",1:"单位 PF（=1000 TFLOPS/卡）· 请按 FP8 稠密峰值填写（如 H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）",0.5:"INT4 weight-only 量化实际以 BF16 算力跑矩阵乘 → 请填 BF16 稠密峰值；W4A8/W4A4 才填 INT8/FP4 档"}[bw];
+  { const basisTxt = PFB==="fp8" ? "FP8 稠密" : "BF16 稠密", custom = (+$("gpu").value===0);
+    $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 当前按「"+basisTxt+"」填写 —— "
+      + (custom ? "自定义默认以 FP8 稠密峰值为基准（H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）；若权重精度为 BF16/FP16，须改填 BF16 稠密（≈ 其一半，H100 ≈ 1.0 PF）"
+                : "已按所选型号 × 权重精度自动取该档标称值")
+      + (bw===0.5 ? "；INT4/NVFP4 属 weight-only，反量化后由 BF16 矩阵乘执行，故仍为 BF16 稠密" : ""); }
 
   // —— KV：主 KV + DSA 索引（每 token，随 KV 精度）+ 线性状态（每序列，FP32）——
   const sTokB=(m.et+(m.idx||0))*bk, stateB=(m.es||0)*(m.esB||4)+(m.ws||0)*(m.wsB===0?bk:1);
