@@ -70,7 +70,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <section>
     <div class="card"><h2>计算节点</h2>
       <div class="grid2">
-        <div class="f"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint">选择型号自动填算力/显存；也可「自定义」后手改</div></div>
+        <div class="f"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint">选择型号自动填算力/显存；也可「自定义」后手改</div>
+        <div class="hint" id="memhint" style="display:none">已在本机记住你的自定义算力/显存 · <a href="#" id="resetmem" style="color:var(--red)">重置为默认</a></div></div>
         <div class="f"><label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><b>单 GPU 算力</b><span id="pfbadge" class="pfb">FP8 稠密</span></label><input id="pf" type="number" value="1.2" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
         <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
@@ -236,6 +237,9 @@ function pfBasisLabel(){
   return PFB==="fp8" ? "FP8 稠密" : PFB==="int8" ? "INT8 稠密（等效 FP8）" : "BF16 稠密";
 }   // INT4/NVFP4 的「反量化后按 BF16 执行」说明见下方提示语
 function showPfBadge(){ const b=$("pfbadge"); if(b) b.textContent=pfBasisLabel(); }
+let memTimer=null;
+function saveCustom(){ clearTimeout(memTimer); memTimer=setTimeout(()=>{
+  try{ localStorage.setItem(MEM_KEY, JSON.stringify(gsCustom)); }catch(e){} }, 250); }
 function syncPf(){
   const t=pfTarget();
   if(t===PFB){ showPfBadge(); return; }
@@ -315,6 +319,7 @@ function calc(){
   const wr = lam*S_GB, rd = wr*RAMPL;
   // 24h 分时加权负荷系数（先算，容量与磨损都要用）
   const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
+  if(+$("gpu").value===0){ gsCustom={pf:+$("pf").value||1.2, hbm:+$("hbm").value||144, pfb:PFB}; saveCustom(); }   // 实时记住自定义设定
   // 容量永远按给定保留窗口的峰值全量保留（与忙闲时段无关）；忙闲系数只作用于日写入/磨损
   const cap = wr*th*3600*RED;
   const dailyGB = wr*86400*wf,
@@ -445,6 +450,15 @@ const GPUS=[
  ["海光 BW1000（深算三号）",null,0.48,64,"FP16 480 TF（部署文档口径，官方未直接公布）；BW1000_H 低配档 130 TF"],
  ["海光 BW1100",0.26,0.13,144,"144GB HBM3e 模组卡、原生 FP8；算力官方未公布，按 2026 白皮书配置表 FP8≈260 / FP16≈130 TF"],
 ];
+// 「自定义」模式的设定：实时跟踪 + 用 localStorage 跨刷新记住（纯前端，无需后端）
+let gsCustom={pf:1.2,hbm:144,pfb:"fp8"};
+const MEM_KEY="kvcalc.customGpu";
+let haveSaved=false;
+try{ const s=JSON.parse(localStorage.getItem(MEM_KEY)||"null");
+     if(s && isFinite(s.pf) && isFinite(s.hbm) && s.pf>0 && s.hbm>0){
+       gsCustom={pf:+s.pf, hbm:+s.hbm, pfb:["fp8","int8","bf16"].includes(s.pfb)?s.pfb:"bf16"};
+       haveSaved=true;
+     } }catch(e){}
 {const gs=$("gpu");
  GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
  const fill=()=>{const x=GPUS[+gs.value];
@@ -453,13 +467,29 @@ const GPUS=[
    $("pf").value = useFp8 ? x[1] : useInt8 ? +(2*x[2]).toFixed(3) : x[2];
    PFB = useFp8 ? "fp8" : useInt8 ? "int8" : "bf16"; showPfBadge();
    $("hbm").value=x[3]; $("gpumodelhint").textContent=x[4]; calc(); };
- gs.addEventListener("change",fill);
+ gs.addEventListener("change",()=>{
+   const x=GPUS[+gs.value];
+   if(x[3]==null){                       // 切回「自定义」：恢复此前设定的算力 / 显存，而不是沿用上一个型号的值
+     $("pf").value=gsCustom.pf; $("hbm").value=gsCustom.hbm; PFB=gsCustom.pfb; showPfBadge();
+   }
+   fill();
+ });
  const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
  $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
  $("bw").addEventListener("change",()=>{ if(+gs.value>0){fill();} else {syncPf();} showPfBadge(); calc(); });
- gs.value=0; $("gpumodelhint").textContent="默认自定义；选具体型号将覆盖为厂商标称值。";
- syncPf(); showPfBadge();   // 初始化即把算力换算到默认模型的原生精度档，保证与「切走再切回」一致
+ gs.value=0;
+ if(haveSaved){ $("pf").value=gsCustom.pf; $("hbm").value=gsCustom.hbm; PFB=gsCustom.pfb; }
+ $("gpumodelhint").textContent="默认自定义；选具体型号将覆盖为厂商标称值，切回「自定义」会恢复你此前设定的算力/显存。";
+ syncPf(); showPfBadge();   // 把算力对齐到当前权重精度档
+ if(haveSaved) $("memhint").style.display="block";
 }
+$("resetmem").addEventListener("click",ev=>{
+  ev.preventDefault();
+  try{ localStorage.removeItem(MEM_KEY); }catch(e){}
+  gsCustom={pf:1.2,hbm:144,pfb:"fp8"};
+  $("gpu").value=0; $("pf").value=1.2; $("hbm").value=144; PFB="fp8";
+  $("memhint").style.display="none"; syncPf(); showPfBadge(); calc();
+});
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
 calc();
 </script>
