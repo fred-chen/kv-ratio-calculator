@@ -65,7 +65,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <section>
     <div class="card"><h2>硬件</h2>
       <div class="grid2">
-        <div class="f"><label><b>单 GPU 算力</b>（PFLOPS，标称）</label><input id="pf" type="number" value="2.0" step="0.1" min="0.1"></div>
+        <div class="f"><label><b>单 GPU 算力</b>（PFLOPS，稠密·非稀疏）</label><input id="pf" type="number" value="2.0" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
         <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
         <div class="f"><label><b>计算节点总数</b></label><input id="nodes" type="number" value="32" step="1" min="1"></div>
@@ -129,7 +129,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <div class="foot">
   <div class="card">
     <h3>固定假设（不可调，均已计入公式）</h3>
-    <p><b>算力有效利用率 MFU = 50%</b>：标称 PFLOPS 是峰值，推理中注意力/通信/访存开销后实际约一半能被有效计算利用，业界大模型推理常用取值。<br>
+    <p><b>算力基准</b>："单 GPU 算力"填<b>矩阵乘实际执行精度的稠密（非稀疏）峰值</b>——BF16 权重按 BF16 档、FP8 权重按 FP8 档、INT4（weight-only，主流方案，反量化后用 BF16 算）按 BF16 档；厂商标称的"稀疏翻倍"数字不可用。默认 2.0 PF = H100/H200 的 FP8 稠密峰值（1979 TFLOPS），与报告基线一致。<br>
+    <b>算力有效利用率 MFU = 50%</b>：标称 PFLOPS 是峰值，推理中注意力/通信/访存开销后实际约一半能被有效计算利用，业界大模型推理常用取值。<br>
     <b>显存利用率 = 90%</b>：单卡显存中可安全用于"权重 + KV"的比例，余 10% 给激活值、框架缓存与碎片。<br>
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
@@ -166,7 +167,8 @@ function calc(){
         infl=+$("inflight").value||1, ctx=+$("ctx").value||1, nout=+$("nout").value||512,
         tps=+$("tps").value||1, ttft=+$("ttft").value||500, th=+$("thold").value||2;
   $("mnote").textContent = m.note + " · 最大上下文 " + (m.ctx?m.ctx.toLocaleString():"–") + " · 激活参数 " + m.P + "B" + (m.Pe?"（估算）":"");
-
+  $("pfhint").textContent = {2:"请按 BF16/FP16 稠密峰值填写（如 H100/H200 ≈ 1.0 PF/卡）",1:"请按 FP8 稠密峰值填写（如 H100/H200 ≈ 2.0 PF/卡，即 H100 标称 1979 TFLOPS）",0.5:"INT4 weight-only 量化实际以 BF16 算力跑矩阵乘 → 请填 BF16 稠密峰值；W4A8/W4A4 才填 INT8/FP4 档"}[bw];
+  
   // KV
   const sTokB = m.et*bk;                                   // B/token（随精度）
   const stateB = m.es*4;                                   // B/序列，固定 FP32
