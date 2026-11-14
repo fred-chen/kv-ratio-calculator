@@ -97,7 +97,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="128" step="1" min="1"></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
-        <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="25" step="1" min="1"><div class="hint">tok/s · 每流</div></div>
+        <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint">tok/s · 每流</div></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2 × 负荷系数</div></div>
         <div class="f" style="grid-column:1/-1"><label><b>容量负荷口径</b></label>
@@ -242,7 +242,7 @@ function calc(){
         g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
         bw=+$("bw").value||1, bk=+$("bk").value||2, pd=$("pd").checked,
         infl=Math.max(1,Math.round(num("inflight",128))), ctx=Math.max(1,Math.round(num("ctx",65536))),
-        nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",25)),
+        nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",80)),
         ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2)),
         n0=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>=0?v:d;},
         dw=Math.max(0.01,num("dwpd",1)),
