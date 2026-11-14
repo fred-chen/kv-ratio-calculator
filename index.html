@@ -97,7 +97,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="128" step="1" min="1"></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
-        <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint">tok/s · 每流</div></div>
+        <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2 × 负荷系数</div></div>
         <div class="f" style="grid-column:1/-1"><label><b>容量负荷口径</b></label>
@@ -341,6 +341,7 @@ function calc(){
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
+  $("tpshint").textContent = "tok/s · 每流 → 单实例合计 "+(infl*tps).toLocaleString("zh")+" tok/s（"+infl+" 在途 × "+tps+"）";
   $("d_cf").textContent = cf<1
     ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）；改忙时峰值容量 +"+((1/cf-1)*100).toFixed(0)+"%"
     : "×100%（按忙时峰值）；改 24h 加权容量 −"+((1-wf)*100).toFixed(0)+"%";
