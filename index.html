@@ -375,8 +375,8 @@ function calc(){
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
   $("tpshint").textContent = "tok/s · 每流 → 单实例合计 "+(infl*tps).toLocaleString("zh")+" tok/s（"+infl+" 在途 × "+tps+"）";
   $("d_cf").textContent = cf<1
-    ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）；改忙时峰值容量 +"+((1/cf-1)*100).toFixed(0)+"%"
-    : "×100%（按忙时峰值）；改 24h 加权容量 −"+((1-wf)*100).toFixed(0)+"%";
+    ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）；改忙时峰值：容量 +"+((1/cf-1)*100).toFixed(0)+"%、磨损寿命同比例 +"+((1/cf-1)*100).toFixed(0)+"%"
+    : "×100%（按忙时峰值）；改 24h 加权：容量 −"+((1-wf)*100).toFixed(0)+"%、磨损寿命同比例 −"+((1-wf)*100).toFixed(0)+"%";
   $("capmodehint").textContent = cf<1 ? "忙时实际可保留 ≈ "+(th*cf).toFixed(1)+"h（容量按 24h 平均负载配置）" : "忙时仍完整保留 "+th+"h";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
