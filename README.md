@@ -6,7 +6,7 @@
 2. **单 token KV 大小**——按模型注意力架构（GQA / MLA / 混合线性）× KV 量化精度计算；
 3. **KV 卸载设备的容量与读带宽**——按请求到达率 × 单请求 KV × 保留窗口计算。
 
-内置 13 款开源模型（架构参数解析自各模型 HuggingFace `config.json` 与模型卡片）：
+14 款模型开源模型（架构参数解析自各模型 HuggingFace `config.json` 与模型卡片）：
 Qwen3.8 系列、GLM-5.x、DeepSeek-V4.1-Flash、Kimi-K3 / K3.1-Pro、MiMo-V2.6、HunYuan Hy3 / Hy4-preview、MiniMax-M3 / M3.1-Flash。
 
 ## 计算口径
