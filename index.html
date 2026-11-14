@@ -159,7 +159,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
         <tr><td>24h 分时加权负荷（忙/闲窗）</td><td id="d_wf">–</td></tr>
         <tr><td>日均写入量（按 24h 加权）</td><td id="d_daily">–</td></tr>
-        <tr><td>闪存磨损预计寿命（当前容量 × DWPD）</td><td id="d_life">–</td></tr>
+        <tr><td>等效日覆盖次数（日均写入 ÷ 容量）</td><td id="d_ovw">–</td></tr>
+        <tr><td>闪存磨损预计寿命（按选型容量 × DWPD × 5 年 ÷ 日写入）</td><td id="d_life">–</td></tr>
         <tr><td>磨损保底容量（按期待寿命反推）</td><td id="d_wcap">–</td></tr>
       </tbody></table>
       <details><summary>本页面用到的公式</summary><div id="f_show" style="color:var(--sub);padding-top:6px"></div></details>
@@ -177,7 +178,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
-    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 07–18 时忙 100%、其余闲 20%（w≈58%）。磨损寿命(年) = DWPD × 容量 ÷ 日均写入（日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ DWPD，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口/工作集两个容量口径仍按峰值（忙时）计量不做加权——那是吞吐需求侧；加权只作用于磨损（写入量积分）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 07–18 时忙 100%、其余闲 20%（w≈58%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口/工作集两个容量口径仍按峰值（忙时）计量不做加权——那是吞吐需求侧；加权只作用于磨损（写入量积分）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
@@ -218,7 +219,7 @@ function applyModelDefaults(){ const m=MODELS[+sel.value];
 sel.addEventListener("change",()=>{ applyModelDefaults(); calc(); });
 applyModelDefaults();
 
-const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5;   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
+const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5, DWPD_YEARS=5;   // DWPD 的保修期基准（年）   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
 const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
 
 function calc(){
@@ -273,9 +274,12 @@ function calc(){
   const wr = lam*S_GB, rd = wr*RAMPL, cap = wr*th*3600*RED;   // 保留窗口口径（用户选型）
   // —— 闪存磨损：24h 分时加权（容量口径仍按峰值，加权只作用于磨损）——
   const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
-  const dailyGB = wr*86400*wf, lifeY = dailyGB>0 ? dw*cap/dailyGB : Infinity,
-        wcap = (elife!==null && dailyGB>0) ? elife*dailyGB/dw : 0,
-        capFinal = Math.max(cap, wcap);
+  const dailyGB = wr*86400*wf,
+        // DWPD 以 5 年保修期定义：TBW = DWPD×容量×365×5
+        wcap = (elife!==null && dailyGB>0) ? elife*dailyGB/(dw*DWPD_YEARS) : 0,
+        capFinal = Math.max(cap, wcap),
+        // 寿命按「最终选型容量」核算：若已按期待寿命扩容，则寿命随之达标（闭环）
+        lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
   const capWork = inst*infl*S_GB*RED;                            // 在途工作集×1.2
   const pfUtil = lamInst*Tpf;                                  // prefill 算力占用（可持续流量）
@@ -320,6 +324,8 @@ function calc(){
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
+  const ovw = capFinal>0 ? dailyGB/capFinal : 0;
+  $("d_ovw").textContent = !grid ? dash : ovw.toFixed(2)+" 次/日（= "+(dailyGB/1000).toFixed(1)+" TB/日 ÷ "+humanGB(capFinal)+"）";
   $("d_life").innerHTML = !grid ? dash : (lifeY<riskY
     ? '<span class="risk">'+lifeTxt+' ⚠ 低于'+(elife!==null?'期待 '+elife+' 年':' 5 年风险线')+'</span>（DWPD '+dw+'）'
     : lifeTxt+'（DWPD '+dw+'）'+(elife===null?'，≥5 年风险线':''));
@@ -355,7 +361,7 @@ function calc(){
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
   if(budInst>0){const lv=100*kvFoot/budInst;
-    chk.push(lifeY>=riskY||!isFinite(lifeY) ? {c:"ok",t:"磨损寿命 "+lifeTxt+" ≥ "+(elife!==null?"期待 "+elife+" 年":"5 年风险线")+"（24h 加权负荷 "+(100*wf).toFixed(0)+"%）"}
+    chk.push(lifeY>=riskY||!isFinite(lifeY) ? {c:"ok",t:"磨损寿命 "+lifeTxt+" ≥ "+(elife!==null?"期待 "+elife+" 年":"5 年风险线")+(wcap>cap?"（容量已按磨损保底扩容至 "+humanGB(wcap)+"）":"")+"（24h 加权负荷 "+(100*wf).toFixed(0)+"%）"}
       : {c:"bad",t:"<b class=\"risk\">磨损寿命风险：仅 "+lifeTxt+" &lt; "+(elife!==null?"期待 "+elife+" 年":"5 年风险线")+"</b>——"+(elife!==null?"闪存将在目标年限前写穿；容量需按磨损保底升至 "+humanGB(wcap)+"（max 口径），或改用更高 DWPD（当前 "+dw+"）的盘":"闪存将在 5 年内写穿；可在「期待寿命」填入目标年限以反推所需容量，或改用更高 DWPD（当前 "+dw+"）的盘")});
     chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制×50% 常驻）":"")}
                               : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（扩容阈值）"+(rep>1?"，含 "+rep+"× 复制×50% 常驻":"")+"：建议降在途或加节点"})
