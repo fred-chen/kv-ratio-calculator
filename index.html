@@ -134,8 +134,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <section>
     <div class="res-hero" style="grid-template-columns:1.25fr 1fr 1fr">
       <div class="kpi big"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t"><b>卸载设备容量需求</b>（保留窗口口径）</div></div>
-      <div class="kpi big"><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div><div class="t"><b>KV 写入带宽</b>（峰值口径）</div></div>
-      <div class="kpi big"><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div><div class="t"><b>KV 读取带宽</b>（峰值口径）</div></div>
+      <div class="kpi big"><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div><div class="t"><b>KV 写入带宽</b>（峰值 · 与读并发）</div></div>
+      <div class="kpi big"><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div><div class="t"><b>KV 读取带宽</b>（峰值 · 与写并发）</div></div>
     </div>
     <div class="mini">
       <div><b id="r_inst">–</b> 个可承载实例</div>
@@ -144,6 +144,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备明细（带宽已按峰值口径计入上方）</h2>
       <table><tbody>
+        <tr><td>带宽合计 · <b>读写并发</b>（共享通道按此选型）</td><td id="r_bwsum">–</td></tr>
         <tr><td>每请求 KV 体积 S（平均上下文）</td><td id="r_s">–</td></tr>
         <tr id="row_idx" style="display:none"><td>其中 DSA 索引贡献（token 级状态，随 KV 同精度）</td><td id="r_idx">–</td></tr>
         <tr id="row_state" style="display:none"><td>循环态 / 滑窗快照（每序列）</td><td id="d_state">–</td></tr>
@@ -186,6 +187,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>显存利用率 = 90%</b>：单卡显存中可安全用于"权重 + KV"的比例，余 10% 给激活值、框架缓存与碎片。<br>
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
     <b>带宽按峰值、容量可按忙闲折算</b>：写/读带宽决定「忙时瞬时吞吐能力」，必须按峰值（忙时 100%）配置，不做忙闲折减；只有容量（保留窗口能装多少）可按 24h 加权折算。<br>
+    <b>带宽合计怎么算（读写并发，v1.9）</b>：KV 写入（新 token 落盘）与 KV 读取（历史命中回源）在服务期<b>同时发生</b>。若读写共用物理通道（本地 NVMe、单套存储池、单端口网络——PCIe 与介质通道读写共享），总吞吐约为单向峰值，选型应按<b>写+读合计</b>；若读写走物理独立路径（写本地盘 + 读远端池、或全双工网络上下行独立），则按 <b>max(写, 读)</b> 即可。明细同时给出合计与 max 两个数，勿把两者相加后再拿去比"单盘顺序读带宽"——那是单向口径。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
@@ -315,6 +317,7 @@ function calc(){
   const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
   $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）";
   $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）";
+  $("r_bwsum").textContent = fmtBW(wr+rd)+" GB/s = 写 "+fmtBW(wr)+" + 读 "+fmtBW(rd)+"（读写通道物理独立时只需 max "+fmtBW(Math.max(wr,rd))+"）";
   $("r_s").textContent = humanGB(S_GB);
   if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
   else $("row_idx").style.display="none";
