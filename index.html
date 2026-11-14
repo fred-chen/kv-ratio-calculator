@@ -70,6 +70,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
         <div class="f"><label><b>计算节点总数</b></label><input id="nodes" type="number" value="32" step="1" min="1"></div>
       </div>
+      <div class="hint" id="gpuhint" style="font-size:13px;color:var(--ink);margin-top:4px"></div>
     </div>
     <div class="card"><h2>模型与精度</h2>
       <div class="f"><label><b>模型</b>（架构参数取自 HuggingFace config，见页脚）</label><select id="model"></select><div class="hint" id="mnote"></div></div>
@@ -118,6 +119,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>模型权重（含 PD 副本）</td><td id="d_w">–</td></tr>
         <tr><td>显存 KV 预算 / 实例（利用率 90% 内）</td><td id="d_bud">–</td></tr>
         <tr><td>并行组合（TP 须整除头数，PP 须整除层数）</td><td id="d_grid">–</td></tr>
+        <tr><td>GPU 总数（实例占用 / 闲置）</td><td id="d_gpu">–</td></tr>
         <tr><td>在途 KV 显存占用（水位）</td><td id="d_lv">–</td></tr>
         <tr><td>Prefill 时长（每请求）</td><td id="d_pf">–</td></tr>
         <tr><td>单请求服务时长（prefill + decode）</td><td id="d_svc">–</td></tr>
@@ -223,6 +225,9 @@ function calc(){
   $("r_lam").textContent = lam.toLocaleString("zh",{maximumFractionDigits:1})+" req/s";
   $("d_w").textContent = humanGB(Weff)+(pd?"（双副本）":"");
   $("d_bud").textContent = humanGB(Math.max(budInst,0));
+  const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
+  $("gpuhint").textContent = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = " + totGPU.toLocaleString() + " 卡";
+  $("d_gpu").textContent = grid ? (totGPU.toLocaleString() + " 卡 = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : totGPU.toLocaleString() + " 卡（无法部署实例）";
   $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（显存下限 "+nMem+" 节点"+(nInst>nMem?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
   $("d_lv").textContent = budInst>0 ? (100*infl*S_GB/budInst).toFixed(0)+"%" : "超出显存";
   $("d_pf").textContent = (Tpf*1000).toFixed(0)+" ms";
