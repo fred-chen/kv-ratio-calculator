@@ -191,7 +191,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>带宽合计怎么算（读写并发，v1.9）</b>：KV 写入（新 token 落盘）与 KV 读取（历史命中回源）在服务期<b>同时发生</b>。若读写共用物理通道（本地 NVMe、单套存储池、单端口网络——PCIe 与介质通道读写共享），总吞吐约为单向峰值，选型应按<b>写+读合计</b>；若读写走物理独立路径（写本地盘 + 读远端池、或全双工网络上下行独立），则按 <b>max(写, 读)</b> 即可。明细同时给出合计与 max 两个数，勿把两者相加后再拿去比"单盘顺序读带宽"——那是单向口径。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
-    <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
+    <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填对应档：FP8 权重→FP8 档、BF16/FP16 权重→BF16 档、INT4/NVFP4 weight-only→BF16 档（反量化后由 BF16 矩阵乘执行）。<b>算力必须与权重精度对应</b>：若所选 GPU 无该精度的 Tensor 核心（A100/A800、MTT S4000、海光 BW1000 均无 FP8），则按同级 <b>INT8 稠密折算等效</b>（INT8 稠密 ≈ 2×BF16 稠密：A100 0.624、S4000 0.256、BW1000 0.96 PF），算力框旁以「INT8 稠密（等效 FP8）」标注；自定义卡以 FP8 稠密峰值为基准，切 BF16 权重时自动 ÷2 折算显示。手动改动即视为自定义。<br>
     <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 08–18 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口容量按「容量负荷口径」计算：选 <b>忙时峰值</b>（<b>默认</b>）时不做折减，保证忙时段也能完整保留整个窗口；选 <b>24h 加权</b> 时乘 24h 加权系数 w，容量按窗口内平均业务负载配置（忙时段实际保留时长约为 窗口×w，属用命中率换成本的取舍）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
@@ -229,16 +229,25 @@ sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
 const WDT_LBL={bf16:"BF16",fp8:"FP8",nvfp4:"NVFP4/FP4"};
 // —— 算力档位标识：FP8 稠密 / BF16 稠密（切换模型或权重精度时自动换算为对应档的数值）——
 let PFB="fp8";                                            // 当前算力数字所属档位
-const pfTarget = () => $("bw").value==="1" ? "fp8" : "bf16";
-function pfBasisLabel(){ return PFB==="fp8" ? "FP8 稠密" : "BF16 稠密"; }   // INT4/NVFP4 的「反量化后按 BF16 执行」说明见下方提示语
+const pfTarget = () => {
+  const x=(typeof GPUS!=="undefined") ? GPUS[+$("gpu").value] : null;
+  if($("bw").value==="1"){                       // 权重 FP8
+    if(!x || x[3]==null) return "fp8";           // 自定义/无型号 → 按 FP8
+    return x[1]!=null ? "fp8" : "int8";          // 型号有 FP8 用 FP8；无 FP8（Ampere 等）用 INT8 等效
+  }
+  return "bf16";                                  // BF16 权重 / INT4-weight-only（反量化后按 BF16）
+};
+function pfBasisLabel(){
+  return PFB==="fp8" ? "FP8 稠密" : PFB==="int8" ? "INT8 稠密（等效 FP8）" : "BF16 稠密";
+}   // INT4/NVFP4 的「反量化后按 BF16 执行」说明见下方提示语
 function showPfBadge(){ const b=$("pfbadge"); if(b) b.textContent=pfBasisLabel(); }
 function syncPf(){
   const t=pfTarget();
   if(t===PFB){ showPfBadge(); return; }
   const x=(typeof GPUS!=="undefined") ? GPUS[+$("gpu").value] : null;
   let v=+$("pf").value||1;
-  if(x && x[3]!=null) v = (t==="fp8" ? x[1] : x[2]);      // 已选具体型号 → 取该型号对应档
-  else v = (t==="fp8" ? v*2 : v/2);                       // 自定义 → Hopper/Blackwell 及表内各卡均为 2:1
+  if(x && x[3]!=null) v = (t==="fp8" ? x[1] : t==="int8" ? 2*x[2] : x[2]);   // 型号对应档（INT8 稠密按 2×BF16 稠密折算）
+  else v = (t==="fp8" ? v*2 : v/2);                                          // 自定义 → 2:1
   PFB=t; $("pf").value=+(+v).toFixed(2); showPfBadge();
 }
 function applyModelDefaults(){ const m=MODELS[+sel.value];
@@ -268,10 +277,13 @@ function calc(){
         capMode=$("capmode").value;
   $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
   { const basisTxt = PFB==="fp8" ? "FP8 稠密" : "BF16 稠密", custom = (+$("gpu").value===0);
-    $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 当前按「"+basisTxt+"」填写 —— "
-      + (custom ? "自定义默认以 FP8 稠密峰值为基准（H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）；若权重精度为 BF16/FP16，须改填 BF16 稠密（≈ 其一半，H100 ≈ 1.0 PF）"
-                : "已按所选型号 × 权重精度自动取该档标称值")
-      + (bw===0.5 ? "；INT4/NVFP4 属 weight-only，反量化后由 BF16 矩阵乘执行，故仍为 BF16 稠密" : ""); }
+    $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 权重精度 → 「"+basisTxt+"」算力 —— "
+      + (custom
+          ? (PFB==="fp8" ? "显示 FP8 稠密峰值（H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）"
+                         : "已把 FP8 稠密峰值自动 ÷2 折算显示（H100：FP8 1.98 → BF16 0.99 PF）")
+          : (PFB==="int8" ? "该型号无 FP8 Tensor 核心，已按同级 INT8 稠密折算（= 2×BF16 稠密）等效 FP8 权重"
+                          : "已按所选型号 × 权重精度自动取该档标称值"))
+      + (bw===0.5 ? "；INT4/NVFP4 属 weight-only，反量化后由 BF16 矩阵乘执行，故归入 BF16 档" : ""); }
 
   // —— KV：主 KV + DSA 索引（每 token，随 KV 精度）+ 线性状态（每序列，FP32）——
   const sTokB=(m.et+(m.idx||0))*bk, stateB=(m.es||0)*(m.esB||4)+(m.ws||0)*(m.wsB===0?bk:1);
@@ -445,9 +457,9 @@ const GPUS=[
  GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
  const fill=()=>{const x=GPUS[+gs.value];
    if(x[1]==null&&x[2]==null){$("gpumodelhint").textContent=x[4];calc();return;}
-   const bwv=+$("bw").value, useFp8=(bwv===1&&x[1]!=null);
-   $("pf").value = useFp8 ? x[1] : x[2];
-   PFB = useFp8 ? "fp8" : "bf16"; showPfBadge();
+   const bwv=+$("bw").value, useFp8=(bwv===1&&x[1]!=null), useInt8=(bwv===1&&x[1]==null);
+   $("pf").value = useFp8 ? x[1] : useInt8 ? +(2*x[2]).toFixed(3) : x[2];
+   PFB = useFp8 ? "fp8" : useInt8 ? "int8" : "bf16"; showPfBadge();
    $("hbm").value=x[3]; $("gpumodelhint").textContent=x[4]; calc(); };
  gs.addEventListener("change",fill);
  const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
