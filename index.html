@@ -57,7 +57,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <body>
 <header>
   <h1>KV 卸载与实例规模计算器 <span class="badge" style="color:#ffd;border-color:#ffd">简化版</span></h1>
-  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 计算链/校核对齐报告 v0.12 · 容量双口径并列（保留窗口制 ｜ 报告 F5 在途工作集）· v1.5</p>
+  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 计算链/校核对齐报告 v0.12 · 容量双口径并列（保留窗口制 ｜ 报告 F5 在途工作集）· v1.6</p>
 </header>
 
 <main>
@@ -145,6 +145,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
+    <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / F5 工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
     <b>decode 聚合吞吐参考 dec_agg = 350 tok/s/卡 × 实例 GPU 数 × (算力÷2.0)</b>：锚为报告 F2b 的"32 卡 × 350 tok/s/卡 = 11,200"外推【假设】；decode 是访存受限而非算力受限，此值属粗略参考，务必以实测替换。<br>
@@ -164,7 +165,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 计算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.5（2026-11-14）：与 kvcache.ai 全模型对标修正——DSA/MSA 索引键改 MQA 单键×拥有层（GLM/Hy4 4,096→2,688；MiniMax-M3 +7,296、M3.1 +7,680；Flash-Next 512→384）；MiMo-V2.6 混合滑窗重构（et −81%、新增窗口快照 12.8M/19.7M 元素每序列）。DeepSeek V4.1/0731/K3/Qwen3.8 两家数字本就一致。
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 计算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.6（2026-11-14）：显存口径改为在途 KV 仅 50% 常驻 HBM（KVH=0.5，其余常驻卸载设备）——显存下限/网格搜索/水位同步调整；64K/BF16KV/128 在途的 Qwen3.8 由 8 节点 TP16×PP4 回到 4 节点 TP8×PP4。
+        v1.5（2026-11-14）：与 kvcache.ai 全模型对标修正——DSA/MSA 索引键改 MQA 单键×拥有层（GLM/Hy4 4,096→2,688；MiniMax-M3 +7,296、M3.1 +7,680；Flash-Next 512→384）；MiMo-V2.6 混合滑窗重构（et −81%、新增窗口快照 12.8M/19.7M 元素每序列）。DeepSeek V4.1/0731/K3/Qwen3.8 两家数字本就一致。
         v1.4（2026-11-14）：对官方 inference 代码核对后重构 V4 系/K3 缓存语义——池化压缩 KV、共享 indexer 单键、滑窗快照、KDA 循环态（V4.1 单 token KV 由 35,072 修正为 1,600 元素，-95%）；dec_agg 改按实例 GPU 数缩放（350 tok/s/卡锚）。
         v1.3（2026-11-14）：新增 DeepSeek-V4-Flash-0731（MLA×43，FP4 专家，共 14 款）；权重/KV 精度默认随模型原生精度联动（FP8/FP4 权重 → KV FP8，BF16 → BF16）。
         v1.2（2026-11-14）：复审修订——无网格时抑制幻影校核；PP≤8 偏好与超限红字"不建议上线"；KPI 标注显存/拓扑口径；等效算力实例数；INT4×FP8 错档告警；F5 行单一上下文注记；模型库单一事实源。
@@ -186,7 +188,7 @@ function applyModelDefaults(){ const m=MODELS[+sel.value];
 sel.addEventListener("change",()=>{ applyModelDefaults(); calc(); });
 applyModelDefaults();
 
-const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0;
+const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5;   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
 const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
 
 function calc(){
@@ -220,13 +222,13 @@ function calc(){
     const ppOk=pool.filter(t=>N/t<=8), rest=pool.filter(t=>!ppOk.includes(t)), tryPool=ppOk.concat(rest);
     for(const t of tryPool){
       const r=repOf(t);
-      if(Math.ceil((Weff + r*infl*S_GB)/budNode) <= n){ grid=[t,N/t]; nInst=n; rep=r; break outer; }
+      if(Math.ceil((Weff + r*infl*S_GB*KVH)/budNode) <= n){ grid=[t,N/t]; nInst=n; rep=r; break outer; }
     }
   }
   const inst = grid ? Math.floor(nodes/nInst) : 0;
-  const nMemEff = Math.ceil((Weff + (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB)/budNode);
+  const nMemEff = Math.ceil((Weff + (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB*KVH)/budNode);
   const budInst = nInst*budNode - Weff;
-  const kvFoot = (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB;   // 实例显存 KV 足迹（含复制）
+  const kvFoot = (grid?rep:repOf(Math.min(g,m.nq)))*infl*S_GB*KVH;   // 实例显存 KV 足迹（含复制，仅计常驻 HBM 的 50%）
 
   // —— 时延与算力（prefill 二次项沿报告 F2：d_kv 取 K 侧；与报告同为不乘 2×MAC 的口径）——
   const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
@@ -264,9 +266,9 @@ function calc(){
   const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
   $("gpuhint").textContent = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = " + totGPU.toLocaleString() + " 卡";
   $("d_gpu").textContent = grid ? (totGPU.toLocaleString() + " 卡 = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : totGPU.toLocaleString() + " 卡（无法部署实例）";
-  $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
+  $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制×50%常驻后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
   const dash="–（不可部署）";
-  $("d_lv").textContent = grid ? (budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× TP 复制）":"") : "超出显存") : dash;
+  $("d_lv").textContent = grid ? (budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× 复制，按 50% 常驻计）":"") : "超出显存") : dash;
   $("d_pf").textContent = grid ? (Tpf*1000).toFixed(0)+" ms" : dash;
   $("d_svc").textContent = grid ? Tsvc.toFixed(2)+" s" : dash;
   $("d_pfutil").textContent = grid ? (100*pfUtil).toFixed(0)+"%" : dash;
@@ -274,14 +276,14 @@ function calc(){
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_f5").textContent = grid ? humanGB(capF5) : dash;
   $("f_show").innerHTML =
-    "本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"（TP"+(grid?grid[0]:"?")+" 复制）→ 复制后显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
+    "本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"×50%常驻（TP"+(grid?grid[0]:"?")+" 复制）→ 显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
     "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
     "到达率 = "+inst+"×"+infl+"/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 350×"+(nInst*g)+" 卡×算力缩放 = "+decAgg.toFixed(0)+" tok/s";
 
   // —— 校核 ——
   const chk=[];
   if(!grid){
-    chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+复制 KV），当前仅 "+nodes+" 节点"
+    chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+50% 常驻的复制 KV），当前仅 "+nodes+" 节点"
       : "至 "+nHi+" 节点无合法 TP×PP 且显存可行组合：TP 须整除 "+m.nq+" 头与 "+m.dm+" 宽、PP 须整除 "+m.L+" 层、TP≤"+tpMax+"（可试降在途/上下文/位宽，或加节点）"});
   }else{
     if(nInst>nMemEff) chk.push({c:"warn",t:"显存只需 "+nMemEff+" 节点，但 TP×PP 整除不满足，已上调至 "+nInst+" 节点（TP"+grid[0]+"×PP"+grid[1]+"）"});
@@ -301,8 +303,8 @@ function calc(){
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
   if(budInst>0){const lv=100*kvFoot/budInst;
-    chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制）":"")}
-                              : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（报告扩容阈值）"+(rep>1?"，含 "+rep+"× 复制":"")+"：建议降在途或加节点"})
+    chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制×50% 常驻）":"")}
+                              : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（报告扩容阈值）"+(rep>1?"，含 "+rep+"× 复制×50% 常驻":"")+"：建议降在途或加节点"})
                      : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
   else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
   if(pd) chk.push({c:"warn",t:"PD 分离按权重×2 建模；其 decode 隔离收益未折入（实际 tps 上限可更高）"});
