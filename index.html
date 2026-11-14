@@ -449,7 +449,7 @@ const GPUS=[
  gs.addEventListener("change",fill);
  const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
  $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
- $("bw").addEventListener("change",()=>{ if(+gs.value>0){fill();} else {syncPf();} showPfBadge(); });
+ $("bw").addEventListener("change",()=>{ if(+gs.value>0){fill();} else {syncPf();} showPfBadge(); calc(); });
  gs.value=0; $("gpumodelhint").textContent="默认自定义：FP8 稠密 1.2 PF / 144 GB；选具体型号将覆盖为厂商标称值。";
  showPfBadge();
 }
