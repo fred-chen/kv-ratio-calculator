@@ -57,7 +57,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <body>
 <header>
   <h1>KV 卸载与实例规模计算器 <span class="badge" style="color:#ffd;border-color:#ffd">简化版</span></h1>
-  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 计算链/校核对齐报告 v0.12 · 容量双口径并列（保留窗口制 ｜ 报告 F5 在途工作集）· v1.1</p>
+  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 计算链/校核对齐报告 v0.12 · 容量双口径并列（保留窗口制 ｜ 报告 F5 在途工作集）· v1.2</p>
 </header>
 
 <main>
@@ -96,12 +96,12 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <!-- ============ 结果 ============ -->
   <section>
     <div class="res-hero">
-      <div class="kpi"><div class="v" id="r_inst">–</div><div class="u">个</div><div class="t">可承载实例数（全节点）</div></div>
+      <div class="kpi"><div class="v" id="r_inst">–</div><div class="u">个</div><div class="t">可承载实例数（显存/拓扑口径）</div></div>
       <div class="kpi"><div class="v" id="r_rack">–</div><div class="u">节点 / 实例</div><div class="t">每实例所需节点</div></div>
     </div>
     <div class="res-hero" style="margin-top:12px">
       <div class="kpi"><div class="v" id="r_stok">–</div><div class="u" id="r_stoku"></div><div class="t">单 token KV 缓存（主 KV＋索引；线性状态另计）</div></div>
-      <div class="kpi"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t">卸载设备所需容量</div></div>
+      <div class="kpi"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t">卸载设备容量 · 保留窗口制（报告 F5 见明细）</div></div>
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备带宽</h2>
       <table><tbody>
@@ -127,7 +127,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>prefill 算力占用（按可持续流量）</td><td id="d_pfutil">–</td></tr>
         <tr><td>decode 吞吐占用（÷ 参考聚合 dec_agg）</td><td id="d_decutil">–</td></tr>
         <tr><td>算力可持续在途 / 实例</td><td id="d_inflmax">–</td></tr>
-        <tr><td>报告 F5 口径容量（在途工作集 ×1.2）</td><td id="d_f5">–</td></tr>
+        <tr><td>F5 工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_f5">–</td></tr>
       </tbody></table>
       <details><summary>本页面用到的公式</summary><div id="f_show" style="color:var(--sub);padding-top:6px"></div></details>
     </div>
@@ -160,7 +160,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>循环状态 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 计算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.1（2026-11-14）：审计修订——TP KV 复制入显存核算；prefill/decode 占用拆分（dec_agg 参考）；单 token KV 计入 DSA 索引；TP×PP 搜索纳入复制系数一致性（单趟搜索）；容量双口径并列（保留窗口 / 报告 F5）；DSv4.1 每层维 576 兜底；输入守卫与诊断文案修正；水位阈值 70%；GPU 总数显示。</p>
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = 联想超节点存储配比报告 v0.12 计算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.2（2026-11-14）：复审修订——无网格时抑制幻影校核；PP≤8 偏好与超限红字"不建议上线"；KPI 标注显存/拓扑口径；等效算力实例数；INT4×FP8 错档告警；F5 行单一上下文注记；模型库单一事实源。
+        v1.1（2026-11-14）：审计修订——TP KV 复制入显存核算；prefill/decode 占用拆分（dec_agg 参考）；单 token KV 计入 DSA 索引；TP×PP 搜索纳入复制系数一致性（单趟搜索）；容量双口径并列（保留窗口 / 报告 F5）；DSv4.1 每层维 576 兜底；输入守卫与诊断文案修正；水位阈值 70%；GPU 总数显示。</p>
   </div>
 </div>
 
@@ -173,7 +174,7 @@ MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.text
 sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
 
 const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0;
-const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:0})+" MB";
+const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
 
 function calc(){
   // —— 输入解析与守卫（P2-2）——
@@ -203,7 +204,8 @@ function calc(){
     if(!cands.length) continue;
     const pref=cands.filter(t=>t<=tpMax), pool=pref.length?pref:cands;
     pool.sort((a,b)=>{const xa=a<=g,xb=b<=g; if(xa!==xb)return xa?-1:1; return xa?b-a:a-b;});
-    for(const t of pool){
+    const ppOk=pool.filter(t=>N/t<=8), tryPool=ppOk.length?ppOk:pool;
+    for(const t of tryPool){
       const r=repOf(t);
       if(Math.ceil((Weff + r*infl*S_GB)/budNode) <= n){ grid=[t,N/t]; nInst=n; rep=r; break outer; }
     }
@@ -224,6 +226,7 @@ function calc(){
   const decAgg = 11200*(pf/2.0);                               // decode 聚合吞吐参考（线性缩放自 H100×8 实测 11,200 tok/s）
   const decUtil = infl*tps/decAgg;
   const inflMax = Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
+  const instComp = pfUtil>1 ? Math.max(0,Math.floor(inst*inflMax/infl)) : inst;
 
   // —— 输出 ——
   $("r_inst").textContent = inst;
@@ -245,13 +248,14 @@ function calc(){
   $("gpuhint").textContent = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = " + totGPU.toLocaleString() + " 卡";
   $("d_gpu").textContent = grid ? (totGPU.toLocaleString() + " 卡 = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : totGPU.toLocaleString() + " 卡（无法部署实例）";
   $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
-  $("d_lv").textContent = budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× TP 复制）":"") : "超出显存";
-  $("d_pf").textContent = (Tpf*1000).toFixed(0)+" ms";
-  $("d_svc").textContent = Tsvc.toFixed(2)+" s";
-  $("d_pfutil").textContent = (100*pfUtil).toFixed(0)+"%";
-  $("d_decutil").textContent = (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）";
-  $("d_inflmax").textContent = inflMax.toLocaleString()+" / 实例（目标 "+infl+"）";
-  $("d_f5").textContent = humanGB(capF5);
+  const dash="–（不可部署）";
+  $("d_lv").textContent = grid ? (budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× TP 复制）":"") : "超出显存") : dash;
+  $("d_pf").textContent = grid ? (Tpf*1000).toFixed(0)+" ms" : dash;
+  $("d_svc").textContent = grid ? Tsvc.toFixed(2)+" s" : dash;
+  $("d_pfutil").textContent = grid ? (100*pfUtil).toFixed(0)+"%" : dash;
+  $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
+  $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
+  $("d_f5").textContent = grid ? humanGB(capF5) : dash;
   $("f_show").innerHTML =
     "本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"（TP"+(grid?grid[0]:"?")+" 复制）→ 复制后显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
     "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
@@ -267,15 +271,18 @@ function calc(){
     if(inst>=1) chk.push({c:"ok",t:"显存口径可部署 "+inst+" 个实例（每实例 "+nInst+" 节点，TP"+grid[0]+"×PP"+grid[1]+(rep>1?"，KV 每实例复制 ×"+rep:"")+"）"});
     else chk.push({c:"bad",t:"最小合法实例 "+nInst+" 节点 > 总节点 "+nodes+"：加节点 / 降在途 / 降权重位宽 / 减上下文"});
     if(grid[0]>g) chk.push({c:"warn",t:"TP"+grid[0]+" 跨 "+(grid[0]/g)+" 节点（超出单机 NVLink 域），依赖高速跨机张量并行"});
-    if(grid[1]>8) chk.push({c:"warn",t:"PP"+grid[1]+" 段数偏多：单请求穿越 "+grid[1]+" 段流水线，调度与尾延迟需实测评估（或考虑 EP/DP 拓扑）"});
+    if(grid[1]>8) chk.push({c:"bad",t:"PP"+grid[1]+" 超出建议上限 8：单请求须穿越 "+grid[1]+" 段流水线，本拓扑不建议直接上线——结果仅作容量测算，部署需引入 EP/DP 或降低在途/上下文（页面未搜索 EP/DP 拓扑）"});
   }
   if(m.ctx && ctx>m.ctx) chk.push({c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超模型上限 "+m.ctx.toLocaleString()+"，结果仅供参考"});
+  if(bw===0.5 && pf>1.2) chk.push({c:"warn",t:"INT4 权重 + "+pf+" PF 疑似口径错档：weight-only INT4 以 BF16 算力执行，若此值来自 FP8 峰值请改约 "+(pf/2)+" PF，否则 prefill/decode 将乐观约 2×"});
+  if(grid){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
                           : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
   chk.push(pfUtil<=1 ? {c:"ok",t:"prefill 算力占用 "+(100*pfUtil).toFixed(0)+"%（到达率 "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
-                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"（目标 "+infl+"），建议降在途 / 加节点"});
+                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"/实例（目标 "+infl+"），等效算力仅 ≈"+instComp+" 个满在途实例（显存口径 "+inst+" 个）——降在途 / 加节点"});
   chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toFixed(0)+" tok/s）"}
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
+  }
   if(budInst>0){const lv=100*kvFoot/budInst;
     chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制）":"")}
                               : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（报告扩容阈值）"+(rep>1?"，含 "+rep+"× 复制":"")+"：建议降在途或加节点"})
@@ -292,8 +299,11 @@ $("preset").addEventListener("click",e=>{ e.preventDefault();
 MODELS.forEach(m=>{
   const tr=document.createElement("tr");
   const arch=m.cls==="hybrid"?`混合 ${m.Lf}+${m.Ll}`:m.cls==="mla"?`MLA ×${m.L}`:`GQA ×${m.L}`;
-  const note=(m.note.replace(/\s/g,"")===arch.replace(/\s/g,""))?"":m.note;
-  tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${arch}${note?"（"+note+"）":""}</td><td>${m.W.toLocaleString()} B</td><td title="${m.psrc}">${m.Pe?"~":""}${m.P} B</td><td>${(m.et+(m.idx||0)).toLocaleString()}${m.idx?"（索引 "+m.idx.toLocaleString()+"）":""}</td><td>${m.es?m.es.toLocaleString():"–"}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
+  let nt=m.note;
+  for(const pre of [`MLA×${m.L}`,`MLA ×${m.L}`,`混合：${m.Lf} 全注意力 + ${m.Ll} 线性`,"GQA"]){ if(nt.startsWith(pre)){ nt=nt.slice(pre.length); break; } }
+  nt=nt.replace(/^[，,、：:；;\s]+/,"").replace(/[，,。]+$/,"").trim();
+  const note=nt?(nt.startsWith("（")?nt:"（"+nt+"）"):"";
+  tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${arch}${note}</td><td>${m.W.toLocaleString()} B</td><td title="${m.psrc}">${m.Pe?"~":""}${m.P} B</td><td>${(m.et+(m.idx||0)).toLocaleString()}${m.idx?"（索引 "+m.idx.toLocaleString()+"）":""}</td><td>${m.es?m.es.toLocaleString():"–"}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
   $("mdb").appendChild(tr);
 });
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
