@@ -170,7 +170,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
         <tr><td>容量负荷系数（avg=24h 加权 / peak=忙时峰值）</td><td id="d_cf">–</td></tr>
         <tr><td>24h 分时加权负荷（忙/闲窗）</td><td id="d_wf">–</td></tr>
-        <tr><td>日均写入量（按 24h 加权）</td><td id="d_daily">–</td></tr>
+        <tr><td>日均写入量（<b>已按忙闲加权</b>：峰值 × 24h 负荷系数）</td><td id="d_daily">–</td></tr>
+        <tr><td>对照：若全天满载（不折算）的日写入</td><td id="d_dailypeak">–</td></tr>
         <tr><td>等效日覆盖次数（日均写入 ÷ 容量）</td><td id="d_ovw">–</td></tr>
         <tr><td>闪存磨损预计寿命（按选型容量 × DWPD × 5 年 ÷ 日写入）</td><td id="d_life">–</td></tr>
         <tr><td>磨损保底容量（按期待寿命反推）</td><td id="d_wcap">–</td></tr>
@@ -380,6 +381,7 @@ function calc(){
   $("capmodehint").textContent = cf<1 ? "忙时实际可保留 ≈ "+(th*cf).toFixed(1)+"h（容量按 24h 平均负载配置）" : "忙时仍完整保留 "+th+"h";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
+  $("d_dailypeak").textContent = grid ? (wr*86400>=1000?(wr*86400/1000).toFixed(1)+" TB/日":(wr*86400).toFixed(0)+" GB/日")+"（× 100%，仅作对照）" : dash;
   const ovw = capFinal>0 ? dailyGB/capFinal : 0;
   $("d_ovw").textContent = !grid ? dash : ovw.toFixed(2)+" 次/日（= "+(dailyGB/1000).toFixed(1)+" TB/日 ÷ "+humanGB(capFinal)+"）";
   $("d_life").innerHTML = !grid ? dash : (lifeY<riskY
