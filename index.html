@@ -101,12 +101,6 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2 × 负荷系数</div></div>
-        <div class="f" style="grid-column:1/-1"><label><b>容量负荷口径</b></label>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-            <select id="capmode" style="width:auto;min-width:212px;padding:6px 8px;font-size:13.5px"><option value="avg">24h 加权（忙闲折算）</option><option value="peak" selected>忙时峰值（2h 全保留）</option></select>
-            <span class="hint" id="capmodehint" style="margin:0"></span>
-          </div>
-        </div>
         <div class="f" style="grid-column:1/-1;margin-top:2px"><label><b>忙闲分时负荷</b>（% 峰值，用于磨损的 24h 加权）</label>
           <div style="display:flex;flex-direction:column;gap:7px;font-size:13.5px;color:var(--sub)">
             <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
@@ -168,7 +162,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>decode 吞吐占用（÷ 参考聚合 dec_agg）</td><td id="d_decutil">–</td></tr>
         <tr><td>算力可持续在途 / 实例</td><td id="d_inflmax">–</td></tr>
         <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
-        <tr><td>容量负荷系数（avg=24h 加权 / peak=忙时峰值）</td><td id="d_cf">–</td></tr>
+        <tr><td>忙闲负荷系数（容量与日均写入同口径折算）</td><td id="d_cf">–</td></tr>
         <tr><td>24h 分时加权负荷（忙/闲窗）</td><td id="d_wf">–</td></tr>
         <tr><td>日均写入量（<b>已按忙闲加权</b>：峰值 × 24h 负荷系数）</td><td id="d_daily">–</td></tr>
         <tr><td>对照：若全天满载（不折算）的日写入</td><td id="d_dailypeak">–</td></tr>
@@ -193,7 +187,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填对应档：FP8 权重→FP8 档、BF16/FP16 权重→BF16 档、INT4/NVFP4 weight-only→BF16 档（反量化后由 BF16 矩阵乘执行）。<b>算力必须与权重精度对应</b>：若所选 GPU 无该精度的 Tensor 核心（A100/A800、MTT S4000、海光 BW1000 均无 FP8），则按同级 <b>INT8 稠密折算等效</b>（INT8 稠密 ≈ 2×BF16 稠密：A100 0.624、S4000 0.256、BW1000 0.96 PF），算力框旁以「INT8 稠密（等效 FP8）」标注；自定义卡以 FP8 稠密峰值为基准，切 BF16 权重时自动 ÷2 折算显示。手动改动即视为自定义。<br>
-    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 08–18 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>注意</b>：保留窗口容量按「容量负荷口径」计算：选 <b>忙时峰值</b>（<b>默认</b>）时不做折减，保证忙时段也能完整保留整个窗口；选 <b>24h 加权</b> 时乘 24h 加权系数 w，容量按窗口内平均业务负载配置（忙时段实际保留时长约为 窗口×w，属用命中率换成本的取舍）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 08–18 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>口径统一（v1.9.1）</b>：保留窗口容量与日均写入量<b>同口径</b>——容量 = 写带宽 × 窗口 × 1.2 × w、日均写入 = 写带宽 × 86400 × w，两者都用同一个忙闲负荷系数 w。因此：<b>忙时段填 0–24 即「全时段忙」口径</b>（w=100%，容量回到峰值、日写入为全天满载），填 08–18 等区间即「忙闲分时」口径（w<100%，容量与日写入同步按比例缩小）。两种口径的等效日覆盖次数与磨损寿命<b>相同</b>（只差容量量级），寿命 = 5年×容量÷日写入。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
@@ -274,8 +268,8 @@ function calc(){
         dw=Math.max(0.01,num("dwpd",1)),
         elife=(()=>{const s=$("elife").value.trim(), v=parseFloat(s); return (s!==""&&isFinite(v)&&v>0)?Math.max(0.1,v):null;})(),
         riskY=(elife===null?5:elife),
-        bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100,
-        capMode=$("capmode").value;
+        bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100;
+
   $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
   { const basisTxt = pfBasisLabel(), custom = (+$("gpu").value===0);
     $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 权重精度 → 「"+basisTxt+"」算力 —— "
@@ -321,8 +315,8 @@ function calc(){
   const wr = lam*S_GB, rd = wr*RAMPL;
   // 24h 分时加权负荷系数（先算，容量与磨损都要用）
   const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
-  // 容量负荷系数：avg=按 24h 加权（2h 窗口内的平均业务负载），peak=忙时峰值（最坏窗口全保留）
-  const cf = capMode==="avg" ? wf : 1;
+  // 容量与日写入量统一由忙闲负荷系数驱动：忙时 0–24 即全忙（wf=100%，容量回到峰值口径）
+  const cf = wf;
   const cap = wr*th*3600*RED*cf;   // 保留窗口口径（用户选型，负荷系数已计入）
   const dailyGB = wr*86400*wf,
         // DWPD 以 5 年保修期定义：TBW = DWPD×容量×365×5
@@ -375,10 +369,7 @@ function calc(){
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
   $("tpshint").textContent = "tok/s · 每流 → 单实例合计 "+(infl*tps).toLocaleString("zh")+" tok/s（"+infl+" 在途 × "+tps+"）";
-  $("d_cf").textContent = cf<1
-    ? "×"+(100*cf).toFixed(0)+"%（按 24h 加权）；改忙时峰值：容量 +"+((1/cf-1)*100).toFixed(0)+"%、磨损寿命同比例 +"+((1/cf-1)*100).toFixed(0)+"%"
-    : "×100%（按忙时峰值）；改 24h 加权：容量 −"+((1-wf)*100).toFixed(0)+"%、磨损寿命同比例 −"+((1-wf)*100).toFixed(0)+"%";
-  $("capmodehint").textContent = cf<1 ? "忙时实际可保留 ≈ "+(th*cf).toFixed(1)+"h（容量按 24h 平均负载配置）" : "忙时仍完整保留 "+th+"h";
+  $("d_cf").textContent = "×"+(100*cf).toFixed(0)+"%（"+(cf>=0.999?"忙时段 0–24，全忙即峰值口径":"容量与写入同比折算；若把忙时段设为 0–24 即切换为全忙口径")+"）";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
   $("d_dailypeak").textContent = grid ? (wr*86400>=1000?(wr*86400/1000).toFixed(1)+" TB/日":(wr*86400).toFixed(0)+" GB/日")+"（× 100%，仅作对照）" : dash;
