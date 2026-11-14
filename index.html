@@ -166,7 +166,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认选中 H100 SXM）（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
         v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
 </div>
@@ -338,14 +338,14 @@ const GPUS=[
  GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
  const fill=()=>{const x=GPUS[+gs.value];
    if(x[1]==null&&x[2]==null){$("gpuhint").textContent=x[4];calc();return;}
-   const bwv=num("bw",1);
+   const bwv=+$("bw").value;
    $("pf").value=(bwv===1&&x[1]!=null)?x[1]:x[2];
    $("hbm").value=x[3]; $("gpuhint").textContent=x[4]; calc(); };
  gs.addEventListener("change",fill);
  const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3])){gs.value=0;$("gpuhint").textContent="已改为自定义值。";}};
  $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk);
  $("bw").addEventListener("change",()=>{if(+gs.value>0)fill();});
- gs.value=0; $("gpuhint").textContent="选型号自动填充；也可选「自定义」或直接在下方手动修改。";
+ gs.value=Math.max(1,GPUS.findIndex(x=>x[0].startsWith("NVIDIA H100"))); fill();   // 默认选中 H100 SXM
 }
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
 calc();
