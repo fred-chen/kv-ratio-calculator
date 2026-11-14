@@ -94,7 +94,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
-        <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="40" step="1" min="1"></div>
+        <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="48" step="1" min="1"></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
@@ -241,7 +241,7 @@ function calc(){
   const m=MODELS[+sel.value], pf=Math.max(0.05,num("pf",2)), hbm=Math.max(1,num("hbm",144)),
         g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
         bw=+$("bw").value||1, bk=+$("bk").value||2, pd=$("pd").checked,
-        infl=Math.max(1,Math.round(num("inflight",40))), ctx=Math.max(1,Math.round(num("ctx",65536))),
+        infl=Math.max(1,Math.round(num("inflight",48))), ctx=Math.max(1,Math.round(num("ctx",65536))),
         nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",80)),
         ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2)),
         n0=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>=0?v:d;},
