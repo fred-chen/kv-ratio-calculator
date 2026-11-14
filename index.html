@@ -139,8 +139,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备带宽</h2>
       <table><tbody>
-        <tr><td>KV 写入速率（在途全部落盘，去重率 0）</td><td id="r_wr">–</td></tr>
-        <tr><td>KV 读取带宽（写 × 读放大 1.0）</td><td id="r_rd">–</td></tr>
+        <tr><td>KV 写入速率（<b>峰值口径</b>：忙时满载，不随忙闲折算）</td><td id="r_wr">–</td></tr>
+        <tr><td>KV 读取带宽（<b>峰值口径</b>：写 × 读放大 1.0）</td><td id="r_rd">–</td></tr>
         <tr><td>每请求 KV 体积 S（平均上下文）</td><td id="r_s">–</td></tr>
         <tr id="row_idx" style="display:none"><td>其中 DSA 索引贡献（token 级状态，随 KV 同精度）</td><td id="r_idx">–</td></tr>
         <tr id="row_state" style="display:none"><td>循环态 / 滑窗快照（每序列）</td><td id="d_state">–</td></tr>
@@ -182,6 +182,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>算力有效利用率 MFU = 50%</b>：标称 PFLOPS 是峰值，推理中注意力/通信/访存开销后实际约一半能被有效计算利用，业界大模型推理常用取值。<br>
     <b>显存利用率 = 90%</b>：单卡显存中可安全用于"权重 + KV"的比例，余 10% 给激活值、框架缓存与碎片。<br>
     <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
+    <b>带宽按峰值、容量可按忙闲折算</b>：写/读带宽决定「忙时瞬时吞吐能力」，必须按峰值（忙时 100%）配置，不做忙闲折减；只有容量（保留窗口能装多少）可按 24h 加权折算。<br>
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填 FP8 或 BF16 档（INT4 weight-only 填 BF16 档）；手动改动即视为自定义。<br>
