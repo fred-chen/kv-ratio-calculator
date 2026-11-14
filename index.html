@@ -80,7 +80,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16（2 B/元素）</option><option value="1" selected>FP8（1 B/元素）</option><option value="0.5">INT4/NVFP4（0.5 B/元素）</option></select></div>
       </div>
       <div class="hint" style="margin-top:4px">切换模型时两个精度自动置为<b>原生默认</b>：FP8 / FP4（NVFP4）权重模型 → KV 默认 FP8；BF16 权重模型 → KV 默认 BF16；手动改过的手动值保留。</div>
-      <label class="chk"><input type="checkbox" id="pd"> PD 分离（Prefill / Decode 分离部署，权重双副本）</label>
+      <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，权重双副本）</label>
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
@@ -166,7 +166,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
-    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认选中 H100 SXM）（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认选中 H100 SXM）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
         v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
 </div>
