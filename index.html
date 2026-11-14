@@ -369,7 +369,9 @@ function calc(){
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
   const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
   $("tpshint").textContent = "tok/s · 每流 → 单实例合计 "+(infl*tps).toLocaleString("zh")+" tok/s（"+infl+" 在途 × "+tps+"）";
-  $("d_cf").textContent = "×"+(100*cf).toFixed(0)+"%（"+(cf>=0.999?"忙时段 0–24，全忙即峰值口径":"容量与写入同比折算；若把忙时段设为 0–24 即切换为全忙口径")+"）";
+  $("d_cf").textContent = "×"+(100*cf).toFixed(0)+"%（"+(cf>=0.999
+    ? "忙时段 0–24，全忙即峰值口径"
+    : "容量与写入同比折算；忙时实际可保留 ≈ "+(th*cf).toFixed(2)+"h，把忙时段设为 0–24 可切回全忙口径（完整保留 "+th+"h）")+"）";
   $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
   $("d_daily").textContent = grid ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
   $("d_dailypeak").textContent = grid ? (wr*86400>=1000?(wr*86400/1000).toFixed(1)+" TB/日":(wr*86400).toFixed(0)+" GB/日")+"（× 100%，仅作对照）" : dash;
