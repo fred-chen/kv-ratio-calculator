@@ -29,11 +29,11 @@ main{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template
 .res-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .mini{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:10px;padding:9px 13px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--sub)}
 .mini b{color:var(--ink);font-weight:700;font-size:14.5px;font-variant-numeric:tabular-nums}
-.kpi.big .v{font-size:32px}
+
 .kpi{background:linear-gradient(160deg,#fff,#faf6f6);border:1px solid #f0dcd9;border-radius:10px;padding:14px;text-align:center}
-.kpi .v{font-size:30px;font-weight:800;color:var(--red);line-height:1.2}
-.kpi .u{font-size:12px;color:var(--sub)}
-.kpi .t{font-size:12.5px;color:var(--sub);margin-top:2px}
+.kpi .t{font-size:13.5px;color:var(--ink);font-weight:600;margin-bottom:8px;line-height:1.35}
+.kpi .v{font-size:32px;font-weight:800;color:var(--red);line-height:1.15}
+.kpi .u{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.5}
 table{width:100%;border-collapse:collapse;font-size:13px}
 td{padding:6px 8px;border-bottom:1px solid var(--line)}
 td:first-child{color:var(--sub)}
@@ -133,9 +133,9 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
   <!-- ============ 结果 ============ -->
   <section>
     <div class="res-hero" style="grid-template-columns:1.25fr 1fr 1fr">
-      <div class="kpi big"><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div><div class="t"><b>卸载设备容量需求</b>（保留窗口口径）</div></div>
-      <div class="kpi big"><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div><div class="t"><b>KV 写入带宽</b>（峰值 · 与读并发）</div></div>
-      <div class="kpi big"><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div><div class="t"><b>KV 读取带宽</b>（峰值 · 与写并发）</div></div>
+      <div class="kpi big"><div class="t"><b>容量需求</b></div><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div></div>
+      <div class="kpi big"><div class="t"><b>KV 写入带宽</b></div><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div></div>
+      <div class="kpi big"><div class="t"><b>KV 读取带宽</b></div><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div></div>
     </div>
     <div class="mini">
       <div><b id="r_inst">–</b> 个可承载实例</div>
@@ -315,8 +315,8 @@ function calc(){
   const lifeSpan = (isFinite(lifeY)&&lifeY<riskY) ? '<span class="risk">≈'+lifeTxt+'</span>' : "≈"+lifeTxt;
   $("r_capu").innerHTML = (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b>":"保留窗口 "+th+"h"+(cf<1?" × 负荷 "+(100*cf).toFixed(0)+"%":"（峰值）")+" 口径")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
   const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
-  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）";
-  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）";
+  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）· 峰值口径，与读并发";
+  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）· 峰值口径，与写并发";
   $("r_bwsum").textContent = fmtBW(wr+rd)+" GB/s = 写 "+fmtBW(wr)+" + 读 "+fmtBW(rd)+"（读写通道物理独立时只需 max "+fmtBW(Math.max(wr,rd))+"）";
   $("r_s").textContent = humanGB(S_GB);
   if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
