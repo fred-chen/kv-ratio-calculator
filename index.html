@@ -276,7 +276,7 @@ function calc(){
         bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100,
         capMode=$("capmode").value;
   $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
-  { const basisTxt = PFB==="fp8" ? "FP8 稠密" : "BF16 稠密", custom = (+$("gpu").value===0);
+  { const basisTxt = pfBasisLabel(), custom = (+$("gpu").value===0);
     $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 权重精度 → 「"+basisTxt+"」算力 —— "
       + (custom
           ? (PFB==="fp8" ? "显示 FP8 稠密峰值（H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）"
