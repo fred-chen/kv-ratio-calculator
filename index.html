@@ -381,7 +381,7 @@ function calc(){
     : lifeTxt+'（DWPD '+dw+'）'+(elife===null?'，≥5 年风险线':''));
   $("d_wcap").textContent = !grid ? dash : (elife===null
     ? "未计入（期待寿命留空，容量仅按保留窗口）"
-    : (wcap>cap ? humanGB(wcap)+" —— 磨损主导，选型容量取此值" : humanGB(wcap)+"（低于保留窗口容量，后者主导）"));
+    : (wcap>cap ? humanGB(wcap)+" —— 磨损主导，选型容量取此值（<b>窗口再缩小也不会低于此保底</b>：保底按日均写入 × 期待寿命推算，与窗口无关）" : humanGB(wcap)+"（低于保留窗口容量，后者主导）"));
   $("f_show").innerHTML =
     "本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"×50%常驻（TP"+(grid?grid[0]:"?")+" 复制）→ 显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
     "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
