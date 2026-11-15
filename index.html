@@ -328,6 +328,7 @@ function calc(){
         // 寿命按「最终选型容量」核算：若已按期待寿命扩容，则寿命随之达标（闭环）
         lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
+  const thEff = (grid && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长
   const capWork = inst*infl*S_GB*RED;                            // 在途工作集×1.2
   const pfUtil = lamInst*Tpf;                                  // prefill 算力占用（可持续流量）
   const decAgg = 350*(pf/2.0)*Math.max(1,nInst)*g;             // 引擎锚 350 tok/s/卡（32 卡=11,200 外推【假设】），按实例 GPU 数×算力缩放
@@ -343,7 +344,7 @@ function calc(){
   else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
   $("r_cap").textContent = capFinal>=1000?(capFinal/1000).toLocaleString("zh",{maximumFractionDigits:1}):capFinal.toLocaleString("zh",{maximumFractionDigits:0});
   const lifeSpan = (isFinite(lifeY)&&lifeY<riskY) ? '<span class="risk">≈'+lifeTxt+'</span>' : "≈"+lifeTxt;
-  $("r_capu").innerHTML = (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b>":"保留窗口 "+th+"h 全量保留 · 不受忙闲影响")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
+  $("r_capu").innerHTML = (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b> · 实际可保留 KV <b>"+thEff.toFixed(2)+" h</b>（输入窗口 "+th+" h）":"保留窗口 "+th+"h 全量保留 · 不受忙闲影响")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
   const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
   $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s（≈"+(wr*8/1000).toFixed(2)+" Tbit/s）· 峰值口径，与读并发";
   $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）· 峰值口径，与写并发";
@@ -370,7 +371,6 @@ function calc(){
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
-  const thEff = (grid && wr>0) ? capFinal/(wr*3600*RED) : 0;
   $("d_theff").innerHTML = grid ? (thEff >= th*1.01
       ? thEff.toFixed(2)+" h（输入窗口 "+th+" h；<b>磨损保底扩容的隐含收益</b>：容量可保留更久 / 降低回源，或作冗余）"
       : thEff.toFixed(2)+" h（= 输入窗口，容量未被磨损扩容）") : dash;
