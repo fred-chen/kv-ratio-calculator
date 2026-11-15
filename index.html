@@ -26,6 +26,7 @@ main{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template
 .chk input{width:16px;height:16px;accent-color:var(--red)}
 .hint{font-size:11.5px;color:#8a93a5;margin-top:2px}
 .risk{color:var(--bad);font-weight:800}
+.hot{color:var(--red);font-weight:800}
 .pfb{display:inline-block;white-space:nowrap;font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:1.5px 6px;border-radius:8px;margin-left:6px;vertical-align:2px;letter-spacing:.2px}
 .res-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .mini{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:10px;padding:9px 13px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--sub)}
@@ -356,8 +357,8 @@ function calc(){
   $("d_w").textContent = humanGB(Weff)+(pd?"（双副本）":"");
   $("d_bud").textContent = humanGB(Math.max(budInst,0));
   const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
-  $("gpuhint").textContent = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = " + totGPU.toLocaleString() + " 卡";
-  $("d_gpu").textContent = grid ? (totGPU.toLocaleString() + " 卡 = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : totGPU.toLocaleString() + " 卡（无法部署实例）";
+  $("gpuhint").innerHTML = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = <span class=\"hot\" style=\"font-size:15.5px\">" + totGPU.toLocaleString() + " 卡</span>";
+  $("d_gpu").innerHTML = grid ? ("<span class=\"hot\">" + totGPU.toLocaleString() + " 卡</span> = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : "<span class=\"hot\">" + totGPU.toLocaleString() + " 卡</span>（无法部署实例）";
   $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制×50%常驻后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
   const dash="–（不可部署）";
   $("d_lv").textContent = grid ? (budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× 复制，按 50% 常驻计）":"") : "超出显存") : dash;
