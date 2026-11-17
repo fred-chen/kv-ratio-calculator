@@ -93,10 +93,19 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       </div>
       <div class="hint" style="margin-top:4px">切换模型时两个精度自动置为<b>原生默认</b>：FP8 / FP4（NVFP4）权重模型 → KV 默认 FP8；BF16 权重模型 → KV 默认 BF16；手动改过的手动值保留。</div>
       <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，权重双副本）</label>
+      <div id="pdblock" style="display:none;margin-top:8px;padding:9px 11px;background:#fafbfc;border:1px solid var(--line);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <b style="font-size:13px">PD 池节点配比</b>
+          <label style="font-size:12.5px">P 节点 <input id="pnodes" type="number" value="0" min="0" step="1" style="width:58px;padding:5px 7px;text-align:center"></label>
+          <label style="font-size:12.5px">D 节点 <input id="dnodes" type="number" value="0" min="0" step="1" style="width:58px;padding:5px 7px;text-align:center"></label>
+          <button id="pdbal" type="button" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">按算力均衡推荐</button>
+        </div>
+        <div class="hint" id="pdhint" style="margin-top:5px"></div>
+      </div>
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
-        <div class="f"><label><b>单实例在途请求数</b></label><input id="inflight" type="number" value="40" step="1" min="1"></div>
+        <div class="f"><label><b id="inflight_lbl">单实例在途请求数</b></label><input id="inflight" type="number" value="40" step="1" min="1"></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
@@ -134,8 +143,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <div class="kpi big"><div class="t"><b>KV 读取带宽</b></div><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div></div>
     </div>
     <div class="mini">
-      <div><b id="r_inst">–</b> 个可承载实例</div>
-      <div><b id="r_rack">–</b> 节点 / 实例</div>
+      <div><b id="r_inst">–</b> <span id="r_inst_l">个可承载实例</span></div>
+      <div><b id="r_rack">–</b> <span id="r_rack_l">节点 / 实例</span></div>
       <div>单 token KV <b id="r_stok">–</b> <span id="r_stoku"></span></div>
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备明细（带宽已按峰值口径计入上方）</h2>
@@ -189,7 +198,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填对应档：FP8 权重→FP8 档、BF16/FP16 权重→BF16 档、INT4/NVFP4 weight-only→BF16 档（反量化后由 BF16 矩阵乘执行）。<b>算力必须与权重精度对应</b>：若所选 GPU 无该精度的 Tensor 核心（A100/A800、MTT S4000、海光 BW1000 均无 FP8），则按同级 <b>INT8 稠密折算等效</b>（INT8 稠密 ≈ 2×BF16 稠密：A100 0.624、S4000 0.256、BW1000 0.96 PF），算力框旁以「INT8 稠密（等效 FP8）」标注；自定义卡以 FP8 稠密峰值为基准，切 BF16 权重时自动 ÷2 折算显示。手动改动即视为自定义。<br>
-    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 <b>08–18</b> 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>窗口 ⇄ 寿命的容量闭环（v1.9.1）</b>：输入的「KV 保留窗口」只是容量下限；若「期待寿命」反推的磨损保底更高，选型容量被抬到窗口之上，此时多出的容量意味着<b>实际可保留更长的 KV 窗口</b>——等效保留窗口 = 选型容量 ÷（写带宽 × 1.2），已在明细显示；也可视为容量冗余。反向耦合同样成立：调大窗口 → 容量变大 → 覆盖次数变密 → 寿命变短。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 <b>08–18</b> 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>PD 分离双池模型（v1.9.2）</b>：勾选 PD 分离后出现「PD 池节点配比」——P 节点只做 prefill（产出 KV 写入存储），D 节点只做 decode（命中时从存储读回）。两池节点数<b>可直接输入</b>，「按算力均衡推荐」按 <b>λ = min(P 供给, D 供给)</b> 最大的原则穷举节点分配：P 供给 = 每节点（算力×MFU）÷ 单请求 prefill FLOPs，D 供给 = 每节点（350 tok/s/卡 × 算力缩放）÷ 输出长度；两池各自先找满足「权重单副本（+D 池在途 KV 50% 常驻）」的最小合法 TP×PP 实例再乘实例数。系统吞吐、KV 写带宽、容量、日写入、磨损寿命均由该 λ 推导；明细给出两池利用率与瓶颈，告警提示 P/D 配比失衡或节点超配/闲置。注意：此模型下 P、D 各持一份权重（即「权重双副本」）。<br>
+    <b>窗口 ⇄ 寿命的容量闭环（v1.9.1）</b>：输入的「KV 保留窗口」只是容量下限；若「期待寿命」反推的磨损保底更高，选型容量被抬到窗口之上，此时多出的容量意味着<b>实际可保留更长的 KV 窗口</b>——等效保留窗口 = 选型容量 ÷（写带宽 × 1.2），已在明细显示；也可视为容量冗余。反向耦合同样成立：调大窗口 → 容量变大 → 覆盖次数变密 → 寿命变短。<br>
     <b>容量与忙闲无关（v1.9.1）</b>：容量估算<b>永远按给定的 KV 保留窗口全量保留</b>——即按最忙时段（窗口内满载）的写入速率 × 窗口 × 1.2 计，不受忙闲时段长短或闲时负荷影响。忙闲分时负荷<b>只作用于日写入量</b>（日均写入 = 峰值写带宽 × 86400 × w），进而影响磨损寿命与「期待寿命反推保底容量」。因此改忙时段只会改变寿命，不会改变容量 KPI（除非触发磨损保底主导）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，留空时为 5 年）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
@@ -258,6 +268,50 @@ showPfBadge();
 const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5, DWPD_YEARS=5;   // DWPD 的保修期基准（年）   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
 const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
 
+// —— PD 池：在 n 节点内找最小合法实例网格（withKv=false 仅权重；true=权重+在途KV 常驻）——
+function findPoolGrid(m,g,hbm,W1,kvOf){
+  const budNode=g*hbm*UTIL, kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g);
+  for(let n=1;n<=1024;n++){
+    const N=n*g, cands=[];
+    for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) cands.push(t); }
+    if(!cands.length) continue;
+    const pref=cands.filter(t=>t<=tpMax), pool=pref.length?pref:cands;
+    pool.sort((a,b)=>{const xa=a<=g,xb=b<=g; if(xa!==xb)return xa?-1:1; return xa?b-a:a-b;});
+    const ppOk=pool.filter(t=>N/t<=8);
+    for(const t of ppOk.concat(pool.filter(q=>!ppOk.includes(q)))){
+      const r=Math.max(1,Math.ceil(t/kvHeads));
+      if(Math.ceil((W1+(kvOf?kvOf(r):0))/budNode)<=n) return {nodes:n,grid:[t,N/t],rep:r};
+    }
+  }
+  return null;
+}
+// —— PD 均衡配比：穷举 P 节点数，λ=min(P 供给, D 供给) 最大者（尊重两池最小实例节点数）——
+function pdBestSplit(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const infl=Math.max(1,Math.round(+$("inflight").value||40));
+  const bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const W1=m.W*bwv;
+  const gp=findPoolGrid(m,g,hbm,W1,null), gd=findPoolGrid(m,g,hbm,W1,r=>r*infl*S*KVH);
+  if(!gp||!gd) return {gp,gd,best:null};
+  const cP=g*pf*1e15*MFU/fl, cD=g*350*(pf/2)/nout, nodes=Math.max(1,Math.round(+$("nodes").value||1));
+  let best=null;
+  for(let nP=gp.nodes;nP<=nodes-gd.nodes;nP++){
+    const nD=nodes-nP;
+    const lP=Math.floor(nP/gp.nodes)*gp.nodes*cP, lD=Math.floor(nD/gd.nodes)*gd.nodes*cD;
+    const l=Math.min(lP,lD);
+    if(!best||l>best.l+1e-12) best={nP,nD,l};
+  }
+  return {gp,gd,best,cP,cD};
+}
+function applyPDBalance(force){
+  const b=pdBestSplit();
+  const curP=+$("pnodes").value||0, curD=+$("dnodes").value||0;
+  if(b.best && (force || (curP===0&&curD===0))){ $("pnodes").value=b.best.nP; $("dnodes").value=b.best.nD; }
+  calc();
+}
 function calc(){
   // —— 输入解析与守卫（P2-2）——
   const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
@@ -313,8 +367,37 @@ function calc(){
   // —— 时延与算力（prefill 二次项为工程简化式：d_kv 取 K 侧、不乘 2×MAC）——
   const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
   const Ccap = Math.max(1,nInst)*g*pf*1e15*MFU;
-  const Tpf = fl/Ccap, Tsvc = Tpf + nout/tps;
-  const lamInst = infl/Tsvc, lam = inst*lamInst;
+  let Tpf = fl/Ccap, Tsvc = Tpf + nout/tps;
+  let lamInst = infl/Tsvc, lam = inst*lamInst;
+  let pdP=null, pdD=null;   // PD 分池结果（pd 分支填充）
+  const decAgg = 350*(pf/2.0)*Math.max(1,nInst)*g;             // 引擎锚 350 tok/s/卡（32 卡=11,200 外推【假设】），按实例 GPU 数×算力缩放
+  if(pd){
+    const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    const W1=W_GB;
+    const gp=(nP>0)?findPoolGrid(m,g,hbm,W1,null):null;
+    const gd=(nD>0)?findPoolGrid(m,g,hbm,W1,r=>r*infl*S_GB*KVH):null;
+    const nPCount=gp?Math.floor(nP/gp.nodes):0, nDCount=gd?Math.floor(nD/gd.nodes):0;
+    let lP=0,lD=0,inflD=0;
+    if(gp&&nPCount>0){ const capP=nPCount*gp.nodes*g*pf*1e15*MFU; Tpf=fl/(gp.nodes*g*pf*1e15*MFU); lP=capP/fl; }
+    if(gd&&nDCount>0){
+      const decI=gd.nodes*g*350*(pf/2);
+      const memMax=Math.floor((gd.nodes*budNode-W1)/(gd.rep*S_GB*KVH));
+      inflD=Math.max(0,Math.min(infl,Math.floor(decI/tps),memMax));
+      lD=nDCount*inflD*tps/nout;
+      pdD={nodes:nD,inst:nDCount,gd,decI,decTot:nDCount*decI,inflD,memMax};
+    }
+    if(gp&&nPCount>0) pdP={nodes:nP,inst:nPCount,gp,lP};
+    lam=Math.min(lP,lD);
+    if(lam<=0) lam=0;
+    pdP&&(pdP.util=lam>0?lam/lP:0);
+    pdD&&(pdD.util=lam>0?lam*nout/pdD.decTot:0);
+    Tsvc=Tpf+nout/tps;
+    pdP&&(pdP.lP=lP); pdD&&(pdD.lD=lD);
+    pdP&&pdD&&(pdP.bott=lP<lD-1e-9?"P":(lD<lP-1e-9?"D":"均衡"));
+  }
+  const pfUtilV = pd ? (pdP&&pdP.lP?lam/pdP.lP:0) : lamInst*Tpf;
+  const decUtilV = pd ? (pdD&&pdD.decTot?lam*nout/pdD.decTot:0) : infl*tps/decAgg;
+  const inflMaxV = pd ? (pdD?pdD.inflD:0) : Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
   const wr = lam*S_GB, rd = wr*RAMPL;
   // 24h 分时加权负荷系数（先算，容量与磨损都要用）
   const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
@@ -329,11 +412,8 @@ function calc(){
         lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
   const thEff = (grid && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长
-  const capWork = inst*infl*S_GB*RED;                            // 在途工作集×1.2
-  const pfUtil = lamInst*Tpf;                                  // prefill 算力占用（可持续流量）
-  const decAgg = 350*(pf/2.0)*Math.max(1,nInst)*g;             // 引擎锚 350 tok/s/卡（32 卡=11,200 外推【假设】），按实例 GPU 数×算力缩放
-  const decUtil = infl*tps/decAgg;
-  const inflMax = Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
+  const capWork = (pd&&pdD) ? pdD.inst*pdD.inflD*S_GB*RED : inst*infl*S_GB*RED;   // 在途工作集×1.2
+  const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
   const instComp = pfUtil>1 ? Math.max(0,Math.floor(inst*inflMax/infl)) : inst;
 
   // —— 输出 ——
@@ -371,6 +451,28 @@ function calc(){
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
   $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
   $("d_work").textContent = grid ? humanGB(capWork) : dash;
+  if(pd&&pdP&&pdD){
+    // —— PD 池覆写首屏与明细 ——
+    $("r_inst").textContent=pdP.inst; $("r_inst_l").textContent="个 P 实例（每实例 "+pdP.gp.nodes+" 节点）";
+    $("r_rack").textContent=pdD.inst; $("r_rack_l").textContent="个 D 实例（每实例 "+pdD.gd.nodes+" 节点）";
+    $("d_grid").textContent="P 池 TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+" × "+pdP.inst+" 实例 ｜ D 池 TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+" × "+pdD.inst+" 实例";
+    const usedP=pdP.inst*pdP.gp.nodes*g, usedD=pdD.inst*pdD.gd.nodes*g;
+    $("d_gpu").innerHTML="<span class=\"hot\">"+(usedP+usedD).toLocaleString()+" 卡</span> = P 池 "+usedP+"（"+pdP.nodes+" 节点）+ D 池 "+usedD+"（"+pdD.nodes+" 节点）· 闲置 "+Math.max(0,nodes*g-usedP-usedD).toLocaleString();
+    const footD=pdD.gd.rep*pdD.inflD*S_GB*KVH, budD=pdD.gd.nodes*budNode-W_GB;
+    $("d_lv").textContent="D 池水位 "+(budD>0?(100*footD/budD).toFixed(0)+"%":"超出")+"（每 D 实例 KV "+humanGB(footD)+"，含 ×"+pdD.gd.rep+" 复制，50% 常驻）";
+    $("d_bud").textContent=humanGB(Math.max(budD,0))+"（D 实例 KV 预算）";
+    $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
+    $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（λ "+lam.toFixed(2)+" req/s × "+nout+" tok ÷ D 池聚合 "+pdD.decTot.toLocaleString()+" tok/s）";
+    $("d_inflmax").textContent=pdD.inflD+" / D 实例（目标 "+infl+"）";
+    $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
+    const rec=pdBestSplit(), sum=pdP.nodes+pdD.nodes;
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池":pdP.bott==="D"?"D 池":"两池均衡");
+    if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
+    hs=hs.replace(/ ｜ $/,"");
+    if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
+    else if(sum<nodes) hs+=" ｜ "+(nodes-sum)+" 节点闲置（未分配）";
+    $("pdhint").innerHTML=hs;
+  }
   $("d_theff").innerHTML = grid ? (thEff >= th*1.01
       ? thEff.toFixed(2)+" h（输入窗口 "+th+" h；<b>磨损保底扩容的隐含收益</b>：容量可保留更久 / 降低回源，或作冗余）"
       : thEff.toFixed(2)+" h（= 输入窗口，容量未被磨损扩容）") : dash;
@@ -396,7 +498,8 @@ function calc(){
 
   // —— 风险告警 ——
   const chk=[];
-  if(!grid){
+  if(pd){ /* PD 模式告警在下方 pools 分支统一给出 */ }
+  else if(!grid){
     chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+50% 常驻的复制 KV），当前仅 "+nodes+" 节点"
       : "至 "+nHi+" 节点无合法 TP×PP 且显存可行组合：TP 须整除 "+m.nq+" 头与 "+m.dm+" 宽、PP 须整除 "+m.L+" 层、TP≤"+tpMax+"（可试降在途/上下文/位宽，或加节点）"});
   }else{
@@ -408,13 +511,25 @@ function calc(){
   }
   if(m.ctx && ctx>m.ctx) chk.push({c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超模型上限 "+m.ctx.toLocaleString()+"，结果仅供参考"});
   if(bw===0.5 && pf>1.2) chk.push({c:"warn",t:"INT4 权重 + "+pf+" PF 疑似口径错档：weight-only INT4 以 BF16 算力执行，若此值来自 FP8 峰值请改约 "+(pf/2)+" PF，否则 prefill/decode 将乐观约 2×"});
-  if(grid){
+  if(grid && !pd){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
                           : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
   chk.push(pfUtil<=1 ? {c:"ok",t:"prefill 算力占用 "+(100*pfUtil).toFixed(0)+"%（到达率 "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
                     : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"/实例（目标 "+infl+"），等效算力仅 ≈"+instComp+" 个满在途实例（显存口径 "+inst+" 个）——降在途 / 加节点"});
   chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toLocaleString()+" tok/s，"+nInst+"节点×"+g+"卡）"}
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
+  }
+  if(pd&&pdP&&pdD){
+    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
+    chk.push({c:pdD.bott==="D"?"warn":(pdP.bott==="P"?"ok":"ok"),t:"D 池（"+pdD.nodes+" 节点 → "+pdD.inst+" 实例 × "+pdD.gd.nodes+"，TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）：decode 供给 "+pdD.lD.toFixed(2)+" req/s（每 D 实例在途 "+pdD.inflD+"，KV 水位按 "+pdD.gd.rep+"× 复制），占用 "+(100*decUtilV).toFixed(0)+"%"+(pdP.bott==="D"?" ← 系统瓶颈":"")});
+    const sPD=pdP.nodes+pdD.nodes;
+    if(sPD>nodes) chk.push({c:"bad",t:"P+D 节点数 "+sPD+" 超过总节点 "+nodes+"：超出 "+(sPD-nodes)+" 节点无法部署，请调整配比"});
+    else if(sPD<nodes) chk.push({c:"warn",t:"P+D 节点数 "+sPD+" 少于总节点 "+nodes+"：有 "+(nodes-sPD)+" 节点闲置，可点「按算力均衡推荐」重新分配"});
+    const rb=pdBestSplit();
+    chk.push(rb.best ? {c:"ok",t:"按算力均衡的推荐配比：P "+rb.best.nP+" / D "+rb.best.nD+"（系统 λ 可达 "+rb.best.l.toFixed(2)+" req/s；当前 "+lam.toFixed(2)+" req/s）"}
+                     : {c:"bad",t:"节点不足以同时容纳 P、D 两池的最小合法实例（P 需 "+(pdP?pdP.gp.nodes:"–")+"、D 需 "+(pdD?pdD.gd.nodes:"–")+" 节点）"});
+  }else if(pd){
+    chk.push({c:"bad",t:"PD 分离已启用但 P/D 节点数为 0 或池无法部署：请在「PD 池节点配比」中填写 P、D 节点数（可点「按算力均衡推荐」自动分配）"});
   }
   if(budInst>0){const lv=100*kvFoot/budInst;
     chk.push(lifeY>=riskY||!isFinite(lifeY) ? {c:"ok",t:"磨损寿命 "+lifeTxt+" ≥ "+(elife!==null?"期待 "+elife+" 年":"5 年风险线")+(wcap>cap?"（容量已按磨损保底扩容至 "+humanGB(wcap)+"）":"")+"（24h 加权负荷 "+(100*wf).toFixed(0)+"%）"}
@@ -481,8 +596,16 @@ let gsCustom={pf:1.2,hbm:144,pfb:"fp8"};
  $("gpumodelhint").textContent="默认自定义；选具体型号将覆盖为厂商标称值，切回「自定义」会恢复你本次会话中设定的算力/显存。";
  syncPf(); showPfBadge();   // 把算力对齐到当前权重精度档
 }
-document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",calc));
-calc();
+function pdSyncUI(){
+  const on=$("pd").checked;
+  $("pdblock").style.display=on?"block":"none";
+  $("inflight_lbl").textContent=on?"D 实例在途请求数":"单实例在途请求数";
+  if(!on){ $("r_inst_l").textContent="个可承载实例"; $("r_rack_l").textContent="节点 / 实例"; }
+}
+$("pd").addEventListener("change",()=>{ pdSyncUI(); if($("pd").checked) applyPDBalance(false); else calc(); });
+$("pdbal").addEventListener("click",()=>applyPDBalance(true));
+pdSyncUI();
+if($("pd").checked) applyPDBalance(false); else calc();
 </script>
 </body>
 </html>
