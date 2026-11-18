@@ -475,7 +475,7 @@ function calc(){
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
   $("inflhint").innerHTML = !grid ? "需求参数：由业务峰值并发给定；当前配置无法部署，算力上限未知"
     : (inflMax>=infl ? "需求参数：需求 "+infl+" ≤ <b>算力上限 "+inflMax+"</b>/实例（prefill 有余量）"
-                     : "需求参数：需求 "+infl+" 已超 <b>算力上限 "+inflMax+"</b>/实例 —— 超出部分不产生吞吐，容量按 "+inflMax+" 计");
+                     : "需求参数：需求 "+infl+" 已超<b>算力上限 "+inflMax+"</b>/实例 —— 超出部分不产生吞吐，容量按 "+inflMax+" 计");
   $("d_inflmax").textContent = grid ? Math.min(infl,inflMax).toLocaleString()+" / 实例（需求 "+infl+(inflMax<infl?" → 受算力上限 "+inflMax+" 限流":" ≤ 上限")+"）" : dash;
   $("d_work").textContent = grid ? (humanGB(capWork)+(inflMax<infl?"（按有效在流 "+Math.min(infl,inflMax)+"/"+infl+"）":"")) : dash;
   if(pd&&pdP&&pdD){
@@ -492,9 +492,10 @@ function calc(){
     $("d_bud").textContent=humanGB(Math.max(budD,0))+"（D 实例 KV 预算）";
     $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
     $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（λ "+lam.toFixed(2)+" req/s × "+nout+" tok ÷ D 池聚合 "+pdD.decTot.toLocaleString()+" tok/s）";
-    $("inflhint").innerHTML = (pdD.inflD<infl)
-      ? "需求参数（D 实例）：需求 "+infl+" 已超 <b>D 池上限 "+pdD.inflD+"</b>（decode 算力/显存）—— 超出部分不产生吞吐"
-      : "需求参数（D 实例）：需求 "+infl+" ≤ <b>D 池上限 "+pdD.inflD+"</b>；系统吞吐另受 P 池 "+pdP.lP.toFixed(2)+" req/s 约束";
+    const dCeil=Math.min(Math.floor(pdD.decI/tps), pdD.memMax);   // D 池并发上限（decode 流 / 显存可驻）
+    $("inflhint").innerHTML = (infl>dCeil)
+      ? "需求参数（D 实例）：需求 "+infl+" 已超<b>并发上限 "+dCeil+"</b>（decode 算力上限 "+Math.floor(pdD.decI/tps)+" / 显存可驻 "+pdD.memMax+"）—— 超出部分不产生吞吐"
+      : "需求参数（D 实例）：需求 "+infl+" ≤ <b>并发上限 "+dCeil+"</b>（decode 算力上限 "+Math.floor(pdD.decI/tps)+" / 显存可驻 "+pdD.memMax+"）；系统吞吐另受 P 池 "+pdP.lP.toFixed(2)+" req/s 约束";
     $("d_inflmax").textContent=pdD.inflD+" / D 实例 = min(需求 "+infl+", decode 算力上限 "+Math.floor(pdD.decI/tps)+", 显存可驻 "+pdD.memMax+")";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
