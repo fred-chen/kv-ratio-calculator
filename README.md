@@ -6,8 +6,10 @@
 2. **单 token KV 大小**——按模型注意力架构（GQA / MLA / 混合线性）× KV 量化精度计算；
 3. **KV 卸载设备的容量与读带宽**——按请求到达率 × 单请求 KV × 保留窗口计算。
 
-14 款模型开源模型（架构参数解析自各模型 HuggingFace `config.json` 与模型卡片）：
-Qwen3.8 系列、GLM-5.x、DeepSeek-V4.1-Flash、Kimi-K3 / K3.1-Pro、MiMo-V2.6、HunYuan Hy3 / Hy4-preview、MiniMax-M3 / M3.1-Flash。
+15 款模型开源模型（架构参数解析自各模型 HuggingFace `config.json` 与模型卡片）：
+Qwen3.8 系列（2.4T-A95B / **27B** / Flash-Next）、GLM-5.x、DeepSeek-V4.1-Flash、Kimi-K3 / K3.1-Pro、MiMo-V2.6、HunYuan Hy3 / Hy4-preview、MiniMax-M3 / M3.1-Flash。
+
+> Qwen3.8-27B（`Qwen/Qwen3.8-27B`）：64 层 **混合线性注意力**（16 层全注意力 + 48 层线性，每 4 层插 1 层全注意力），hidden 5120、24 头 / 4 KV 头、head_dim 256，BF16 原生、27.8B **稠密**参数、上下文 262,144。→ 单 token KV 32,768 元素（65.5 KB @BF16）、每序列线性状态 38.93M 元素（155.7 MB @FP32）。
 
 ## 计算口径
 
