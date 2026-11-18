@@ -105,7 +105,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
-        <div class="f"><label><b id="inflight_lbl">需求侧峰值并发</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发总数（全部实例合计）；硬件只决定上限</div></div>
+        <div class="f"><label><b id="inflight_lbl">需求侧峰值并发</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发总数（全部实例合计）；硬件只决定上限。默认值按「P、D 两池同时打满」反解（λ 最大；若因此 TTFT 告警，说明 P 实例粒度偏小，可加大 P 节点或提高实例粒度）；手改并发后不再自动跟随，换模型会重算</div></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
@@ -262,7 +262,7 @@ function syncPf(){
 function applyModelDefaults(){ const m=MODELS[+sel.value];
   $("bw").value = m.wdt==="bf16" ? "2" : m.wdt==="fp8" ? "1" : "0.5";
   $("bk").value = m.wdt==="bf16" ? "2" : "1"; }   // 用户规则：FP8/FP4 权重 → KV FP8；否则 BF16
-sel.addEventListener("change",()=>{ applyModelDefaults(); syncPf(); recalc(); });   // 换模型也要重算推荐配比
+sel.addEventListener("change",()=>{ applyModelDefaults(); syncPf(); inflUserEdited=false; pdUserEdited=false; autoDemand(true); calc(); });   // 换模型：重算 PD 部署 + 并发默认值
 applyModelDefaults();   // 初始状态 = 默认模型的原生精度，与「切走再切回」完全一致
 showPfBadge();
 
@@ -348,7 +348,48 @@ function pdBestSplit(){
   if(!best||best.l<=1e-9) return {best:null,minD};
   return {best,minD};
 }
-let pdUserEdited=false;   // 用户手动改过 P/D 配比后，推荐不再自动覆盖（可点按钮重新委托）
+// —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
+function bestUtilSplit(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
+  let best=null;
+  for(let nD=1;nD<nodes;nD++){
+    const nP=nodes-nD;
+    const pP=supplyAt(m,g,pf,fl,nP,nodes,legal); if(!pP||pP.supply<=0) continue;
+    const Creq=Math.max(1,Math.round(pP.supply*nout/tps));      // 打满 P 所需并发
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal); if(!dP||dP.streams<=0) continue;
+    const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout, pP.supply);
+    const gap=Math.abs(Creq-dP.streams);
+    if(!best||lam>best.lam+1e-12||(Math.abs(lam-best.lam)<=1e-12&&gap<best.gap))
+      best={nP,nD,C,lam,gap};
+  }
+  return best;
+}
+// 非 PD：并发默认取「集群可持续上限」（实例数 × 每实例可持续流）
+function bestSingleCap(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), budNode=g*hbm*UTIL;
+  let best=null;
+  for(const it of legalList(m,g,nodes)){
+    const s=it.s, k=Math.floor(nodes/s); if(k<1) continue;
+    const Tpf=fl/(s*g*pf*1e15*MFU), Tsvc=Tpf+nout/tps, decI=s*g*350*(pf/2);
+    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decI/tps)));
+    const C=k*inflMax;
+    if(W + it.g0.rep*(C/k)*S*KVH > s*budNode) continue;
+    const lam=C/Tsvc;
+    if(!best||lam>best.lam+1e-12) best={s,k,C,lam};
+  }
+  return best;
+}
+let pdUserEdited=false, inflUserEdited=false;   // 用户手动改过 P/D 配比后，推荐不再自动覆盖（可点按钮重新委托）
 function applyPDBalance(force){
   const b=pdBestSplit();
   const curP=+$("pnodes").value||0, curD=+$("dnodes").value||0;
@@ -666,13 +707,31 @@ function pdSyncUI(){
   $("infl_unit").textContent="（集群总）";
   if(!on){ $("r_inst_l").textContent="个可承载实例"; $("r_rack_l").textContent="节点 / 实例"; }
 }
-function recalc(){ if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc(); }
+// 并发默认值 = 「让双池都打满」的自洽点；用户手改过并发后不再自动覆盖（换模型/切 PD 会重算）
+function autoDemand(force){
+  if(!force && inflUserEdited) return false;
+  if($("pd").checked){
+    const b=bestUtilSplit();
+    if(b){ $("inflight").value=b.C; $("pnodes").value=b.nP; $("dnodes").value=b.nD; pdUserEdited=false; return true; }
+  }else{
+    const b=bestSingleCap();
+    if(b){ $("inflight").value=b.C; return true; }
+  }
+  return false;
+}
+function recalc(){
+  const filled=autoDemand(false);
+  if(!filled && $("pd").checked && !pdUserEdited) applyPDBalance(false);
+  else calc();
+}
+$("inflight").addEventListener("input",()=>inflUserEdited=true);
 $("pnodes").addEventListener("input",()=>pdUserEdited=true);
 $("dnodes").addEventListener("input",()=>pdUserEdited=true);
-$("pd").addEventListener("change",()=>{ pdSyncUI(); pdUserEdited=false; if($("pd").checked) applyPDBalance(false); else calc(); });
+$("pd").addEventListener("change",()=>{ pdSyncUI(); pdUserEdited=false; inflUserEdited=false; autoDemand(true); calc(); });
 $("pdbal").addEventListener("click",()=>{ pdUserEdited=false; applyPDBalance(true); });
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
 pdSyncUI();
+autoDemand(true);
 if($("pd").checked) applyPDBalance(false); else calc();
 </script>
 </body>
