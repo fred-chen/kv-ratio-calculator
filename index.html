@@ -536,7 +536,7 @@ function calc(){
   }
   if(budInst>0){const lv=100*kvFoot/budInst;
     chk.push(lifeY>=riskY-1e-9||!isFinite(lifeY) ? {c:"ok",t:"磨损寿命 "+lifeTxt+" ≥ "+(elife!==null?"期待 "+elife+" 年":"3 年风险线")+(wcap>cap?"（容量已按磨损保底扩容至 "+humanGB(wcap)+"）":"")+"（24h 加权负荷 "+(100*wf).toFixed(0)+"%）"}
-      : {c:"bad",t:"<b class=\"risk\">磨损寿命风险：仅 "+lifeTxt+" &lt; "+(elife!==null?"期待 "+elife+" 年":"3 年风险线")+"</b>——"+(elife!==null?"闪存将在目标年限前写穿；容量需按磨损保底升至 "+humanGB(wcap)+"（max 口径），或改用更高 DWPD（当前 "+dw+"）的盘":"闪存将在 5 年内写穿；可在「期待寿命」填入目标年限以反推所需容量，或改用更高 DWPD（当前 "+dw+"）的盘")});
+      : {c:"bad",t:"<b class=\"risk\">磨损寿命风险：仅 "+lifeTxt+" &lt; "+(elife!==null?"期待 "+elife+" 年":"3 年风险线")+"</b>——"+(elife!==null?"闪存将在目标年限前写穿；容量需按磨损保底升至 "+humanGB(wcap)+"（max 口径），或改用更高 DWPD（当前 "+dw+"）的盘":"按当前日写入，闪存将在 3 年风险线内写穿；可在「期待寿命」填入目标年限以反推所需容量，或改用更高 DWPD（当前 "+dw+"）的盘")});
     chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制×50% 常驻）":"")}
                               : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（扩容阈值）"+(rep>1?"，含 "+rep+"× 复制×50% 常驻":"")+"：建议降在途或加节点"})
                      : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
