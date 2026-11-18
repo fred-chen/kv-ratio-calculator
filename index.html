@@ -541,7 +541,7 @@ function calc(){
                               : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（扩容阈值）"+(rep>1?"，含 "+rep+"× 复制×50% 常驻":"")+"：建议降在途或加节点"})
                      : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
   else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
-  if(pd) chk.push({c:"warn",t:"PD 分离按权重×2 建模；其 decode 隔离收益未折入（实际 tps 上限可更高）"});
+  if(pd) chk.push({c:"warn",t:"PD 双池：权重 P、D 各持一份（合计 ×2，显存按此计）；吞吐按保守锚计算（decode 350 tok/s/卡、prefill MFU 0.5），池间隔离后锚值有望更高——实际 tps/λ 上限可优于本页结果"});
   const chkBad=chk.filter(x=>x.c!=="ok"), chkOk=chk.filter(x=>x.c==="ok");
   $("r_chk").innerHTML = (chkBad.length
       ? chkBad.map(x=>`<li class="${x.c}">${x.t}</li>`).join("")
