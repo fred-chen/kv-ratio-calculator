@@ -105,7 +105,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
-        <div class="f"><label><b id="inflight_lbl">需求侧峰值并发</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发总数（全部实例合计）；硬件只决定上限。默认值按「P、D 两池同时打满」反解（λ 最大；若因此 TTFT 告警，说明 P 实例粒度偏小，可加大 P 节点或提高实例粒度）；手改并发后不再自动跟随，换模型会重算</div></div>
+        <div class="f"><label><b id="inflight_lbl">需求侧峰值并发</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发总数（全部实例合计）；硬件只决定上限。默认按 λ 最大反解：P 池打满（并发 = P 供给 × 输出长 ÷ tps），D 池「够服务该并发」即止——但 D 必须放一份完整权重，其最小节点数往往已远超并发所需的 decode 算力（大模型下 D 利用率偏低，明细可见）；手改并发后不再自动跟随，换模型/切 PD 会重算</div></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
@@ -732,7 +732,7 @@ $("pdbal").addEventListener("click",()=>{ pdUserEdited=false; applyPDBalance(tru
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
 pdSyncUI();
 autoDemand(true);
-if($("pd").checked) applyPDBalance(false); else calc();
+calc();   // 初始化：默认并发 + 配比已由 autoDemand 反解，避免再被固定并发口径的推荐覆盖
 </script>
 </body>
 </html>
