@@ -92,7 +92,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16（2 B/元素）</option><option value="1" selected>FP8（1 B/元素）</option><option value="0.5">INT4/NVFP4（0.5 B/元素）</option></select></div>
       </div>
       <div class="hint" style="margin-top:4px">切换模型时两个精度自动置为<b>原生默认</b>：FP8 / FP4（NVFP4）权重模型 → KV 默认 FP8；BF16 权重模型 → KV 默认 BF16；手动改过的手动值保留。</div>
-      <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，权重双副本）</label>
+      <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，每个实例各持一份权重）</label>
       <div id="pdblock" style="display:none;margin-top:8px;padding:9px 11px;background:#fafbfc;border:1px solid var(--line);border-radius:8px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <b style="font-size:13px">PD 池节点配比</b>
@@ -198,7 +198,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
     <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
     <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填对应档：FP8 权重→FP8 档、BF16/FP16 权重→BF16 档、INT4/NVFP4 weight-only→BF16 档（反量化后由 BF16 矩阵乘执行）。<b>算力必须与权重精度对应</b>：若所选 GPU 无该精度的 Tensor 核心（A100/A800、MTT S4000、海光 BW1000 均无 FP8），则按同级 <b>INT8 稠密折算等效</b>（INT8 稠密 ≈ 2×BF16 稠密：A100 0.624、S4000 0.256、BW1000 0.96 PF），算力框旁以「INT8 稠密（等效 FP8）」标注；自定义卡以 FP8 稠密峰值为基准，切 BF16 权重时自动 ÷2 折算显示。手动改动即视为自定义。<br>
-    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 <b>08–18</b> 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>PD 分离双池模型（v1.9.2）</b>：勾选 PD 分离后出现「PD 池节点配比」——P 节点只做 prefill（产出 KV 写入存储），D 节点只做 decode（命中时从存储读回）。两池节点数<b>可直接输入</b>，「按算力均衡推荐」先各自求满足「权重单副本（+D 池在途 KV 50% 常驻）」的<b>最小合法 TP×PP 实例</b>，再枚举 P/D 实例数组合，取 <b>λ = min(P 供给, D 供给)</b> 最大且用满节点者：P 供给 = 实例算力×MFU ÷ 单请求 prefill FLOPs；D 供给 = 每实例在流 × tps ÷ 输出长度，其中在流 = min(目标在途, decode 算力可承载流 = 聚合 tok/s ÷ tps, 显存可驻流)。系统吞吐、KV 写带宽、容量、日写入、磨损寿命均由该 λ 推导；明细给出两池利用率与瓶颈，告警提示 P/D 配比失衡或节点超配/闲置。注意：此模型下 P、D 各持一份权重（即「权重双副本」）；单请求服务时长按 prefill + decode 计，<b>未含 P→D 的 KV 传输与两池排队</b>，故尾延迟（TTFT/TPOT）需以实测校正。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 <b>08–18</b> 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>PD 分离双池模型（v1.9.2）</b>：勾选 PD 分离后出现「PD 池节点配比」——P 节点只做 prefill（产出 KV 写入存储），D 节点只做 decode（命中时从存储读回）。两池节点数<b>可直接输入</b>，「按算力均衡推荐」先各自求满足「权重单副本（+D 池在途 KV 50% 常驻）」的<b>最小合法 TP×PP 实例</b>，再枚举 P/D 实例数组合，取 <b>λ = min(P 供给, D 供给)</b> 最大且用满节点者：P 供给 = 实例算力×MFU ÷ 单请求 prefill FLOPs；D 供给 = 每实例在流 × tps ÷ 输出长度，其中在流 = min(目标在途, decode 算力可承载流 = 聚合 tok/s ÷ tps, 显存可驻流)。系统吞吐、KV 写带宽、容量、日写入、磨损寿命均由该 λ 推导；明细给出两池利用率与瓶颈，告警提示 P/D 配比失衡或节点超配/闲置。注意：<b>每个实例各持一份完整权重，P、D 实例之间不共享</b>——全系统权重占用 = 实例总数 × 单份（如 P 3 + D 1 = 4 份），显存按每实例 1 份核算；单请求服务时长按 prefill + decode 计，<b>未含 P→D 的 KV 传输与两池排队</b>，故尾延迟（TTFT/TPOT）需以实测校正。<br>
     <b>窗口 ⇄ 寿命的容量闭环（v1.9.1）</b>：输入的「KV 保留窗口」只是容量下限；若「期待寿命」反推的磨损保底更高，选型容量被抬到窗口之上，此时多出的容量意味着<b>实际可保留更长的 KV 窗口</b>——等效保留窗口 = 选型容量 ÷（写带宽 × 1.2），已在明细显示；也可视为容量冗余。反向耦合同样成立：调大窗口 → 容量变大 → 覆盖次数变密 → 寿命变短。<br>
     <b>容量与忙闲无关（v1.9.1）</b>：容量估算<b>永远按给定的 KV 保留窗口全量保留</b>——即按最忙时段（窗口内满载）的写入速率 × 窗口 × 1.2 计，不受忙闲时段长短或闲时负荷影响。忙闲分时负荷<b>只作用于日写入量</b>（日均写入 = 峰值写带宽 × 86400 × w），进而影响磨损寿命与「期待寿命反推保底容量」。因此改忙时段只会改变寿命，不会改变容量 KPI（除非触发磨损保底主导）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，<b>留空时为 3 年</b>）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
@@ -353,7 +353,7 @@ function calc(){
   // —— KV：主 KV + DSA 索引（每 token，随 KV 精度）+ 线性状态（每序列，FP32）——
   const sTokB=(m.et+(m.idx||0))*bk, stateB=(m.es||0)*(m.esB||4)+(m.ws||0)*(m.wsB===0?bk:1);
   const S_GB=(sTokB*ctx+stateB)/1e9;
-  const W_GB=m.W*bw, Weff=W_GB*(pd?2:1), budNode=g*hbm*UTIL;
+  const W_GB=m.W*bw, Weff=W_GB, budNode=g*hbm*UTIL;   // Weff = 每实例权重（单份）；全系统份数 = 实例总数（P、D 实例不共享权重）
 
   // —— TP 复制（P0-2/P2-3）：GQA 在 TP>KV头 时复制；MLA latent 按 TP 整份复制（vLLM/SGLang 行为）——
   const kvHeads = m.kvh || (m.cls==="mla" ? 1 : Math.max(1,m.nkv||1));
@@ -461,7 +461,7 @@ function calc(){
     if(parts.length){ $("row_state").style.display=""; $("d_state").textContent=parts.join(" + "); }
     else $("row_state").style.display="none"; }
   $("r_lam").textContent = lam.toLocaleString("zh",{maximumFractionDigits:1})+" req/s";
-  $("d_w").textContent = humanGB(Weff)+(pd?"（双副本）":"");
+  $("d_w").textContent = grid ? (humanGB(inst*Weff)+"（"+inst+" 实例 × 单份 "+humanGB(Weff)+"）") : humanGB(Weff)+"（单份，未部署）";
   $("d_bud").textContent = humanGB(Math.max(budInst,0));
   const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
   $("gpuhint").innerHTML = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = <span class=\"hot\" style=\"font-size:15.5px\">" + totGPU.toLocaleString() + " 卡</span>";
@@ -479,6 +479,8 @@ function calc(){
     // —— PD 池覆写首屏与明细 ——
     $("r_inst").textContent=pdP.inst; $("r_inst_l").textContent="个 P 实例（每实例 "+pdP.gp.nodes+" 节点）";
     $("r_rack").textContent=pdD.inst; $("r_rack_l").textContent="个 D 实例（每实例 "+pdD.gd.nodes+" 节点）";
+    const copies=pdP.inst+pdD.inst;
+    $("d_w").textContent=humanGB(copies*Weff)+"（P "+pdP.inst+" + D "+pdD.inst+" = "+copies+" 份 × 单份 "+humanGB(Weff)+"）";
     $("d_grid").textContent="P 池 TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+" × "+pdP.inst+" 实例 ｜ D 池 TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+" × "+pdD.inst+" 实例";
     const usedP=pdP.inst*pdP.gp.nodes*g, usedD=pdD.inst*pdD.gd.nodes*g;
     $("d_gpu").innerHTML="<span class=\"hot\">"+(usedP+usedD).toLocaleString()+" 卡</span> = P 池 "+usedP+"（"+pdP.nodes+" 节点）+ D 池 "+usedD+"（"+pdD.nodes+" 节点）· 闲置 "+Math.max(0,nodes*g-usedP-usedD).toLocaleString();
@@ -515,7 +517,7 @@ function calc(){
     ? "未计入（期待寿命留空，容量仅按保留窗口）"
     : (wcap>cap ? humanGB(wcap)+" —— 磨损主导，选型容量取此值（<b>窗口再缩小也不会低于此保底</b>：保底按日均写入 × 期待寿命推算，与窗口无关）" : humanGB(wcap)+"（低于保留窗口容量，后者主导）"));
   $("f_show").innerHTML = (pd&&pdP&&pdD)
-    ? ("本例（PD 双池）：P 池权重 "+humanGB(W_GB)+" + D 池权重 "+humanGB(W_GB)+" = 双副本 "+humanGB(Weff)+"；D 池在途 KV "+pdD.gd.rep+"×"+pdD.inflD+"×"+humanGB(S_GB)+"×50%常驻（TP"+pdD.gd.grid[0]+" 复制）→ D 实例显存下限 "+pdD.gd.nodes+" 节点；"+
+    ? ("本例（PD 双池）：每实例各持一份权重 "+humanGB(W_GB)+"，共 "+(pdP.inst+pdD.inst)+" 份（P "+pdP.inst+" + D "+pdD.inst+"）= "+humanGB((pdP.inst+pdD.inst)*W_GB)+"；D 池在途 KV "+pdD.gd.rep+"×"+pdD.inflD+"×"+humanGB(S_GB)+"×50%常驻（TP"+pdD.gd.grid[0]+" 复制）→ D 实例显存下限 "+pdD.gd.nodes+" 节点；"+
        "P 池 "+pdP.inst+" 实例 × "+pdP.gp.nodes+" 节点（TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.inst+" 实例 × "+pdD.gd.nodes+" 节点（TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）供给 "+pdD.lD.toFixed(2)+" req/s；"+
        "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms/P 实例；"+
        "24h 加权 "+(100*wf).toFixed(0)+"% → 日均写 "+(dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB":dailyGB.toFixed(0)+" GB")+" → 磨损寿命≈"+lifeTxt+"；"+
@@ -580,7 +582,7 @@ function calc(){
       : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
     else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
   }
-  if(pd) chk.push({c:"warn",t:"PD 双池：权重 P、D 各持一份（合计 ×2，显存按此计）；吞吐按保守锚计算（decode 350 tok/s/卡、prefill MFU 0.5），池间隔离后锚值有望更高——实际 tps/λ 上限可优于本页结果"});
+  if(pd) chk.push({c:"warn",t:"PD 双池：<b>每个实例各持一份完整权重（P、D 实例之间不共享）</b>，全系统权重 = 实例总数 × 单份（本例 P "+((pdP&&pdP.inst)||0)+" + D "+((pdD&&pdD.inst)||0)+" = "+(((pdP&&pdP.inst)||0)+((pdD&&pdD.inst)||0))+" 份）——显存是按<b>每实例 1 份</b>核算的；吞吐按保守锚计算（decode 350 tok/s/卡、prefill MFU 0.5），池间隔离后锚值有望更高——实际 tps/λ 上限可优于本页结果"});
   const chkBad=chk.filter(x=>x.c!=="ok"), chkOk=chk.filter(x=>x.c==="ok");
   $("r_chk").innerHTML = (chkBad.length
       ? chkBad.map(x=>`<li class="${x.c}">${x.t}</li>`).join("")
