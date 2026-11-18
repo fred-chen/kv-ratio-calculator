@@ -429,6 +429,11 @@ function calc(){
   const capWork = (pd&&pdD) ? pdD.inst*pdD.inflD*S_GB*RED : inst*infl*S_GB*RED;   // 在途工作集×1.2
   const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
   const instComp = pfUtil>1 ? Math.max(0,Math.floor(inst*inflMax/infl)) : inst;
+  // 可持续口径对照（仅用于超订告警）：按 inflMax 限流后的写带宽，同样取窗口容量与磨损保底的大者
+  const wrS=wr*Math.min(1,infl>0?inflMax/infl:1),
+        capS=wrS*th*3600*RED,
+        wcapS=(elife!==null && wrS*86400*wf>0) ? elife*(wrS*86400*wf)/(dw*DWPD_YEARS) : 0,
+        capSus=Math.max(capS,wcapS);
 
   // —— 输出 ——
   $("r_inst").textContent = inst;
@@ -545,7 +550,7 @@ function calc(){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
                           : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
   chk.push(pfUtil<=1 ? {c:"ok",t:"prefill 算力占用 "+(100*pfUtil).toFixed(0)+"%（到达率 "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
-                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"/实例（目标 "+infl+"），等效算力仅 ≈"+instComp+" 个满在途实例（显存口径 "+inst+" 个）——降在途 / 加节点。若改按可持续在途核算，容量约 "+((wr*Math.min(1,inflMax/infl)*th*3600*RED)/1000).toFixed(0)+" TB（当前 KPI 仍按目标 "+infl+" 在途计）"});
+                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"/实例（目标 "+infl+"），等效算力仅 ≈"+instComp+" 个满在途实例（显存口径 "+inst+" 个）——降在途 / 加节点。若改按可持续在途核算，容量约 "+(capSus>=1000?(capSus/1000).toFixed(1):capSus.toFixed(0))+" "+(capSus>=1000?"TB":"GB")+"（当前 KPI 仍按目标 "+infl+" 在途计）"});
   chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toLocaleString()+" tok/s，"+nInst+"节点×"+g+"卡）"}
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
