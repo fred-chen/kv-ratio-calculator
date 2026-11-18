@@ -105,7 +105,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </div>
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
-        <div class="f"><label><b id="inflight_lbl">单实例在途请求数</b></label><input id="inflight" type="number" value="40" step="1" min="1"></div>
+        <div class="f"><label><b id="inflight_lbl">需求侧峰值并发</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（每实例）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：由业务峰值并发给定；硬件只决定上限</div></div>
         <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
@@ -170,7 +170,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>单请求服务时长（prefill + decode）</td><td id="d_svc">–</td></tr>
         <tr><td>prefill 算力占用（按可持续流量）</td><td id="d_pfutil">–</td></tr>
         <tr><td>decode 吞吐占用（÷ 参考聚合 dec_agg）</td><td id="d_decutil">–</td></tr>
-        <tr><td>算力可持续在途 / 实例</td><td id="d_inflmax">–</td></tr>
+        <tr><td>算力上限（可持续在流）/ 实例</td><td id="d_inflmax">–</td></tr>
         <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
         <tr><td><b>等效 KV 保留窗口</b>（选型容量 ÷ 峰值写入速率）</td><td id="d_theff">–</td></tr>
         <tr><td>忙闲负荷系数（<b>仅作用于日均写入与寿命，不影响容量</b>）</td><td id="d_cf">–</td></tr>
@@ -215,7 +215,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项为工程简化式（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×，TTFT 校核相应偏乐观。</p>
     <h3>计算链</h3>
     <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
-    到达率 = 实例数×<b>有效在流</b> ÷ 单请求服务时长（有效在流 = min(目标在途, 算力可持续在流 = ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋)，<b>非 PD 与 PD 统一按可持续口径</b>；目标在流超出算力时只会拉低在流，不会虚增吞吐）；写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
+    到达率 = 实例数×<b>有效在流</b> ÷ 单请求服务时长（有效在流 = min(目标在途, 算力可持续在流 = ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋)，<b>非 PD 与 PD 统一按可持续口径</b>；需求超出上限时只会拉低在流，不会虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「需求侧峰值并发」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
     <h3>模型库（14 款，点开看架构）</h3>
     <details><summary>展开模型数据库</summary>
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
@@ -473,7 +473,10 @@ function calc(){
   $("d_svc").textContent = ok ? Tsvc.toFixed(2)+" s" : dash;
   $("d_pfutil").textContent = grid ? (100*pfUtil).toFixed(0)+"%" : dash;
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
-  $("d_inflmax").textContent = grid ? Math.min(infl,inflMax).toLocaleString()+" / 实例（目标 "+infl+(inflMax<infl?"，算力只能维持 "+inflMax:"，≥目标")+"）" : dash;
+  $("inflhint").innerHTML = !grid ? "需求参数：由业务峰值并发给定；当前配置无法部署，算力上限未知"
+    : (inflMax>=infl ? "需求参数：需求 "+infl+" ≤ <b>算力上限 "+inflMax+"</b>/实例（prefill 有余量）"
+                     : "需求参数：需求 "+infl+" 已超 <b>算力上限 "+inflMax+"</b>/实例 —— 超出部分不产生吞吐，容量按 "+inflMax+" 计");
+  $("d_inflmax").textContent = grid ? Math.min(infl,inflMax).toLocaleString()+" / 实例（需求 "+infl+(inflMax<infl?" → 受算力上限 "+inflMax+" 限流":" ≤ 上限")+"）" : dash;
   $("d_work").textContent = grid ? (humanGB(capWork)+(inflMax<infl?"（按有效在流 "+Math.min(infl,inflMax)+"/"+infl+"）":"")) : dash;
   if(pd&&pdP&&pdD){
     // —— PD 池覆写首屏与明细 ——
@@ -489,7 +492,10 @@ function calc(){
     $("d_bud").textContent=humanGB(Math.max(budD,0))+"（D 实例 KV 预算）";
     $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
     $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（λ "+lam.toFixed(2)+" req/s × "+nout+" tok ÷ D 池聚合 "+pdD.decTot.toLocaleString()+" tok/s）";
-    $("d_inflmax").textContent=pdD.inflD+" / D 实例 = min(目标 "+infl+", decode 算力可承载 "+Math.floor(pdD.decI/tps)+", 显存可驻 "+pdD.memMax+")";
+    $("inflhint").innerHTML = (pdD.inflD<infl)
+      ? "需求参数（D 实例）：需求 "+infl+" 已超 <b>D 池上限 "+pdD.inflD+"</b>（decode 算力/显存）—— 超出部分不产生吞吐"
+      : "需求参数（D 实例）：需求 "+infl+" ≤ <b>D 池上限 "+pdD.inflD+"</b>；系统吞吐另受 P 池 "+pdP.lP.toFixed(2)+" req/s 约束";
+    $("d_inflmax").textContent=pdD.inflD+" / D 实例 = min(需求 "+infl+", decode 算力上限 "+Math.floor(pdD.decI/tps)+", 显存可驻 "+pdD.memMax+")";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
     let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池":pdP.bott==="D"?"D 池":"两池均衡");
@@ -527,7 +533,7 @@ function calc(){
       : ("本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"×50%常驻（TP"+(grid?grid[0]:"?")+" 复制）→ 显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
          "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
          "24h 加权 "+(100*wf).toFixed(0)+"% → 日均写 "+(dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB":dailyGB.toFixed(0)+" GB")+" → 磨损寿命≈"+lifeTxt+"；"+
-         "到达率 = "+inst+"×min(目标 "+infl+", 算力可持续 "+inflMax+")/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 350×"+(nInst*g)+" 卡×算力缩放 = "+decAgg.toFixed(0)+" tok/s"));
+         "到达率 = "+inst+"×min(需求 "+infl+", 算力上限 "+inflMax+")/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 350×"+(nInst*g)+" 卡×算力缩放 = "+decAgg.toFixed(0)+" tok/s"));
 
   // —— 风险告警 ——
   const chk=[];
@@ -549,8 +555,8 @@ function calc(){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
                           : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
   chk.push(inflMax>=infl
-    ? {c:"ok",t:"prefill 算力充足：可持续在途 "+inflMax+"/实例 ≥ 目标 "+infl+"（占用 "+(100*pfUtil).toFixed(0)+"% = "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
-    : {c:"warn",t:"<b>在途受限（可持续口径）</b>：目标 "+infl+" 在流超出实例算力，只能维持 "+inflMax+"/实例（prefill "+(Tpf*1000).toFixed(0)+" ms × "+infl+" 在流 = "+(100*infl*Tpf).toFixed(0)+"%）；吞吐已按 min(目标 "+infl+", "+inflMax+")="+inflMax+" 在流计，容量/带宽随之按可持续口径——若要满足目标在途，需加节点 / 降上下文 / 换更小模型（decode 占用 "+(100*decUtil).toFixed(0)+"%）"});
+    ? {c:"ok",t:"prefill 算力充足：算力上限 "+inflMax+"/实例 ≥ 需求 "+infl+"（占用 "+(100*pfUtil).toFixed(0)+"% = "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
+    : {c:"warn",t:"<b>需求超出算力上限（可持续口径）</b>：需求并发 "+infl+" > 算力上限 "+inflMax+"/实例（prefill "+(Tpf*1000).toFixed(0)+" ms × "+infl+" 并发 = "+(100*infl*Tpf).toFixed(0)+"%）；吞吐按 min(需求 "+infl+", 上限 "+inflMax+")="+inflMax+" 并发计，容量/带宽随之受限——若要满足需求，需加节点 / 降上下文 / 换更小模型（decode 占用 "+(100*decUtil).toFixed(0)+"%）"});
   chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toLocaleString()+" tok/s，"+nInst+"节点×"+g+"卡）"}
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
@@ -643,7 +649,8 @@ let gsCustom={pf:1.4,hbm:144,pfb:"fp8"};
 function pdSyncUI(){
   const on=$("pd").checked;
   $("pdblock").style.display=on?"block":"none";
-  $("inflight_lbl").textContent=on?"D 实例在途请求数":"单实例在途请求数";
+  $("inflight_lbl").textContent="需求侧峰值并发";
+  $("infl_unit").textContent=on?"（每 D 实例）":"（每实例）";
   if(!on){ $("r_inst_l").textContent="个可承载实例"; $("r_rack_l").textContent="节点 / 实例"; }
 }
 function recalc(){ if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc(); }
