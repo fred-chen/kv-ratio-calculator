@@ -296,17 +296,29 @@ function dAt(m,g,hbm,pf,tps,S,W,b,C,legal){            // D 池：可服务并�
     const decI=s*g*350*(pf/2);
     const memMax=Math.floor((used*budNode - k*W)/(it.g0.rep*Math.max(1e-9,S)*KVH));
     const streams=Math.max(0,Math.min(C, decI*k/tps, memMax));
-    if(!best||streams>best.streams+1e-12||(Math.abs(streams-best.streams)<=1e-12&&s<best.s))
-      best={s,k,used,perInst,g:it.g0,streams,decI,memMax};
+    const rank=[streams, ppOK(it.g0), -s];               // 可服务流 > PP≤8 > 实例更小（副本更多）
+    if(!best||rankCmp(rank,best.rank)>0) best={s,k,used,perInst,g:it.g0,streams,decI,memMax,rank};
   }
   return best;
 }
-function supplyAt(m,g,pf,fl,b,nodes,legal){            // P 池：prefill 供给 req/s（并列取更大实例 → TTFT 更低）
-  let best=null;
+function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12) return a[i]-b[i]; } return 0; }
+// 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
+function ppOK(g0){ return g0.pp<=8 ? 1 : 0; }      // PP>8 深度流水：不现实，必须优先避开
+function tpInNode(g0,g){ return g0.tp<=g ? 1 : 0; } // TP 跨机只是弱偏好（真实部署常见 2 节点 TP）
+function supplyAt(m,g,pf,fl,b,nodes,legal,ttftMs){    // P 池：prefill 供给 req/s
+  const cand=[];
   for(const it of legal){ if(it.s>b) break;
-    const s=it.s, k=Math.floor(b/s), used=k*s, supply=used*g*pf*1e15*MFU/fl;
-    if(!best||supply>best.supply+1e-12||(Math.abs(supply-best.supply)<=1e-12&&s>best.s))
-      best={s,k,used,g:it.g0,supply};
+    const s=it.s, k=Math.floor(b/s), used=k*s;
+    cand.push({s,k,used,g:it.g0,supply:used*g*pf*1e15*MFU/fl,Tpf:fl/(s*g*pf*1e15*MFU)});
+  }
+  if(!cand.length) return null;
+  const maxUsed=Math.max(...cand.map(o=>o.used));
+  // 吞吐优先但留 5% 余量：同档内先满足 TTFT，再取 prefill 更快（实例更大）、PP≤8、机内 TP
+  let best=null;
+  for(const o of cand){
+    const ttftOK=(!ttftMs||o.Tpf*1000<=ttftMs)?1:0;
+    const rank=[o.used>=maxUsed*0.95?1:0, ppOK(o.g), ttftOK, -o.Tpf, tpInNode(o.g,g)];
+    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o);
   }
   return best;
 }
@@ -332,12 +344,12 @@ function pdBestSplit(){
   const bwv=+$("bw").value||1, bkv=+$("bk").value||1;
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
   const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
-  const W=m.W*bwv, tps=Math.max(0.5,+$("tps").value||80);
+  const W=m.W*bwv, tps=Math.max(0.5,+$("tps").value||80), ttftMs=Math.max(1,+$("ttft").value||500);
   const nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
   let best=null, minD=0;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
-    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal), pP=supplyAt(m,g,pf,fl,nP,nodes,legal);
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal), pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs);
     if(!dP||!pP) continue;
     if(dP.streams>0 && !minD) minD=nD;
     if(dP.streams<=0||pP.supply<=0) continue;
@@ -356,10 +368,11 @@ function bestUtilSplit(){
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
   const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
+  const ttftMs=Math.max(1,+$("ttft").value||500);
   let best=null;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
-    const pP=supplyAt(m,g,pf,fl,nP,nodes,legal); if(!pP||pP.supply<=0) continue;
+    const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) continue;
     const Creq=Math.max(1,Math.round(pP.supply*nout/tps));      // 打满 P 所需并发
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal); if(!dP||dP.streams<=0) continue;
     const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout, pP.supply);
@@ -442,7 +455,7 @@ function calc(){
   if(pd){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
     const lg = legalList(m,g,Math.max(nP,nD));
-    const pPl = nP>0 ? supplyAt(m,g,pf,fl,nP,nodes,lg) : null;
+    const pPl = nP>0 ? supplyAt(m,g,pf,fl,nP,nodes,lg,Math.max(1,+$("ttft").value||500)) : null;
     const dPl = nD>0 ? dAt(m,g,hbm,pf,tps,S_GB,Weff,nD,infl,lg) : null;
     if(pPl&&dPl){
       const TpfP = fl/(pPl.s*g*pf*1e15*MFU);
@@ -717,7 +730,8 @@ function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
   const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,Math.max(nP,nD));
-  const pP=supplyAt(m,g,pf,fl,nP,nodes,legal); if(!pP||pP.supply<=0) return null;
+  const ttftMs=Math.max(1,+$("ttft").value||500);
+  const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) return null;
   const Creq=Math.max(1,Math.round(pP.supply*nout/tps));
   const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal); if(!dP) return null;
   return Math.max(1,Math.round(Math.min(Creq,dP.streams)));
