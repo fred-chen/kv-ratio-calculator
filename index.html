@@ -439,8 +439,10 @@ function calc(){
   if(sTokMB>=0.01){ $("r_stok").textContent=sTokMB.toLocaleString("zh",{maximumFractionDigits:4}); $("r_stoku").textContent="MB/token（单请求 "+humanGB(S_GB)+"）"; }
   else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
   const pdSum = (pd&&pdP&&pdD) ? pdP.nodes+pdD.nodes : 0;
-  const ok = pd ? !!(pdP&&pdD&&pdSum<=nodes&&lam>0) : !!grid;   // 可部署判据
-  const notWhy = !pd ? "节点数不足以容纳权重与在途 KV 的复制"
+  const ok = pd ? !!(pdP&&pdD&&pdSum<=nodes&&lam>0) : !!(grid&&inst>0);   // 可部署判据
+  const notWhy = !pd ? ((grid&&inst===0)
+        ? "节点数 "+nodes+" 不足以容纳 1 个满足需求并发 "+infl+" 的实例（每实例需 "+nInst+" 节点，含 KV ×"+rep+" 复制）"
+        : "节点数不足以容纳权重与在途 KV 的复制")
     : (!pdP||!pdD) ? ((pdRec&&pdRec.gp&&pdRec.gd&&nodes<pdRec.gp.nodes+pdRec.gd.nodes)
         ? "总节点 "+nodes+" 不足以同时容纳 P 池最小 "+pdRec.gp.nodes+" 节点与 D 池最小 "+pdRec.gd.nodes+" 节点（需 ≥"+(pdRec.gp.nodes+pdRec.gd.nodes)+"）"
         : "P 或 D 节点数为 0，或填写的节点数不足以形成 1 个实例")
