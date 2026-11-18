@@ -72,7 +72,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <div class="card"><h2>计算节点</h2>
       <div class="grid2">
         <div class="f"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint">选择型号自动填算力/显存；也可「自定义」后手改</div></div>
-        <div class="f"><label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><b>单 GPU 算力</b><span id="pfbadge" class="pfb">FP8 稠密</span></label><input id="pf" type="number" value="1.2" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
+        <div class="f"><label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><b>单 GPU 算力</b><span id="pfbadge" class="pfb">FP8 稠密</span></label><input id="pf" type="number" value="1.4" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
         <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
         <div class="f"><label><b>计算节点总数</b></label><input id="nodes" type="number" value="32" step="1" min="1"></div>
@@ -222,7 +222,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     </details>
     <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
     <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）；「硬件」更名为「计算节点」，闪存硬件卡片紧随其下；首屏以**容量需求 / KV 写带宽 / KV 读带宽**三大 KPI 突出呈现，实例数、每实例节点数、单 token KV 降为小字条。
-        v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认「自定义」：FP8 稠密 1.2 PF / 144 GB）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
+        v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认「自定义」：FP8 稠密 1.4 PF / 144 GB；v1.9.2 起由 1.2 上调）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
         v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
   </div>
 </div>
@@ -576,7 +576,7 @@ const GPUS=[
  ["海光 BW1100",0.26,0.13,144,"144GB HBM3e 模组卡、原生 FP8；算力官方未公布，按 2026 白皮书配置表 FP8≈260 / FP16≈130 TF"],
 ];
 // 「自定义」模式的设定：仅在本次页面会话内跟踪（切走再切回时恢复），不做持久化
-let gsCustom={pf:1.2,hbm:144,pfb:"fp8"};
+let gsCustom={pf:1.4,hbm:144,pfb:"fp8"};
 {const gs=$("gpu");
  GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
  const fill=()=>{const x=GPUS[+gs.value];
