@@ -215,7 +215,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项为工程简化式（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×，TTFT 校核相应偏乐观。</p>
     <h3>计算链</h3>
     <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
-    到达率 = 实例数×在途 ÷ 单请求服务时长；写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
+    到达率 = 实例数×<b>有效在流</b> ÷ 单请求服务时长（有效在流 = min(目标在途, 算力可持续在流 = ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋)，<b>非 PD 与 PD 统一按可持续口径</b>；目标在流超出算力时只会拉低在流，不会虚增吞吐）；写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
     <h3>模型库（14 款，点开看架构）</h3>
     <details><summary>展开模型数据库</summary>
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
@@ -381,9 +381,11 @@ function calc(){
   const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
   const Ccap = Math.max(1,nInst)*g*pf*1e15*MFU;
   let Tpf = fl/Ccap, Tsvc = Tpf + nout/tps;
-  let lamInst = infl/Tsvc, lam = inst*lamInst;
   let pdP=null, pdD=null;   // PD 分池结果（pd 分支填充）
-  const decAgg = 350*(pf/2.0)*Math.max(1,nInst)*g;
+  const decAgg = 350*(pf/2.0)*Math.max(1,nInst)*g;   // 引擎锚 350 tok/s/卡，按实例 GPU 数×算力缩放
+  // 算力可持续在流：min(服务时长/prefill 时长, decode 聚合÷每流 tps)；非 PD 吞吐一律按此限流（可持续口径）
+  const inflMaxNP = Math.max(1, Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
+  let lamInst = Math.min(infl, inflMaxNP)/Tsvc, lam = inst*lamInst;
   const pdRec = pd ? pdBestSplit() : null;   // 一次算清，供配比提示与告警复用             // 引擎锚 350 tok/s/卡（32 卡=11,200 外推【假设】），按实例 GPU 数×算力缩放
   if(pd){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
@@ -411,7 +413,7 @@ function calc(){
   }
   const pfUtilV = pd ? (pdP&&pdP.lP?lam/pdP.lP:0) : lamInst*Tpf;
   const decUtilV = pd ? (pdD&&pdD.decTot?lam*nout/pdD.decTot:0) : infl*tps/decAgg;
-  const inflMaxV = pd ? (pdD?pdD.inflD:0) : Math.max(1,Math.floor(Math.min(Tsvc/Tpf, decAgg/tps)));
+  const inflMaxV = pd ? (pdD?pdD.inflD:0) : inflMaxNP;
   const wr = lam*S_GB, rd = wr*RAMPL;
   // 24h 分时加权负荷系数（先算，容量与磨损都要用）
   const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
@@ -426,14 +428,9 @@ function calc(){
         lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
   const thEff = (grid && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长
-  const capWork = (pd&&pdD) ? pdD.inst*pdD.inflD*S_GB*RED : inst*infl*S_GB*RED;   // 在途工作集×1.2
+  const capWork = (pd&&pdD) ? pdD.inst*pdD.inflD*S_GB*RED : inst*Math.min(infl,inflMaxNP)*S_GB*RED;   // 在途工作集×1.2（按有效在流）
   const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
-  const instComp = pfUtil>1 ? Math.max(0,Math.floor(inst*inflMax/infl)) : inst;
-  // 可持续口径对照（仅用于超订告警）：按 inflMax 限流后的写带宽，同样取窗口容量与磨损保底的大者
-  const wrS=wr*Math.min(1,infl>0?inflMax/infl:1),
-        capS=wrS*th*3600*RED,
-        wcapS=(elife!==null && wrS*86400*wf>0) ? elife*(wrS*86400*wf)/(dw*DWPD_YEARS) : 0,
-        capSus=Math.max(capS,wcapS);
+
 
   // —— 输出 ——
   $("r_inst").textContent = inst;
@@ -476,8 +473,8 @@ function calc(){
   $("d_svc").textContent = ok ? Tsvc.toFixed(2)+" s" : dash;
   $("d_pfutil").textContent = grid ? (100*pfUtil).toFixed(0)+"%" : dash;
   $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（dec_agg ≈ "+decAgg.toLocaleString()+" tok/s）" : dash;
-  $("d_inflmax").textContent = grid ? inflMax.toLocaleString()+" / 实例（目标 "+infl+"）" : dash;
-  $("d_work").textContent = grid ? humanGB(capWork) : dash;
+  $("d_inflmax").textContent = grid ? Math.min(infl,inflMax).toLocaleString()+" / 实例（目标 "+infl+(inflMax<infl?"，算力只能维持 "+inflMax:"，≥目标")+"）" : dash;
+  $("d_work").textContent = grid ? (humanGB(capWork)+(inflMax<infl?"（按有效在流 "+Math.min(infl,inflMax)+"/"+infl+"）":"")) : dash;
   if(pd&&pdP&&pdD){
     // —— PD 池覆写首屏与明细 ——
     $("r_inst").textContent=pdP.inst; $("r_inst_l").textContent="个 P 实例（每实例 "+pdP.gp.nodes+" 节点）";
@@ -528,7 +525,7 @@ function calc(){
       : ("本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+infl+"×"+humanGB(S_GB)+"×50%常驻（TP"+(grid?grid[0]:"?")+" 复制）→ 显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
          "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
          "24h 加权 "+(100*wf).toFixed(0)+"% → 日均写 "+(dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB":dailyGB.toFixed(0)+" GB")+" → 磨损寿命≈"+lifeTxt+"；"+
-         "到达率 = "+inst+"×"+infl+"/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 350×"+(nInst*g)+" 卡×算力缩放 = "+decAgg.toFixed(0)+" tok/s"));
+         "到达率 = "+inst+"×min(目标 "+infl+", 算力可持续 "+inflMax+")/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 聚合参考 350×"+(nInst*g)+" 卡×算力缩放 = "+decAgg.toFixed(0)+" tok/s"));
 
   // —— 风险告警 ——
   const chk=[];
@@ -549,8 +546,9 @@ function calc(){
   if(grid && !pd){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
                           : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
-  chk.push(pfUtil<=1 ? {c:"ok",t:"prefill 算力占用 "+(100*pfUtil).toFixed(0)+"%（到达率 "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
-                    : {c:"bad",t:"prefill 算力超订 "+(100*pfUtil).toFixed(0)+"% > 100%：长上下文×高在途的 prefill 需求超出实例算力（decode 仅占 "+(100*decUtil).toFixed(0)+"%）——可持续在途约 "+inflMax+"/实例（目标 "+infl+"），等效算力仅 ≈"+instComp+" 个满在途实例（显存口径 "+inst+" 个）——降在途 / 加节点。若改按可持续在途核算，容量约 "+(capSus>=1000?(capSus/1000).toFixed(1):capSus.toFixed(0))+" "+(capSus>=1000?"TB":"GB")+"（当前 KPI 仍按目标 "+infl+" 在途计）"});
+  chk.push(inflMax>=infl
+    ? {c:"ok",t:"prefill 算力充足：可持续在途 "+inflMax+"/实例 ≥ 目标 "+infl+"（占用 "+(100*pfUtil).toFixed(0)+"% = "+lamInst.toFixed(1)+" req/s × "+(Tpf*1000).toFixed(0)+" ms）"}
+    : {c:"warn",t:"<b>在途受限（可持续口径）</b>：目标 "+infl+" 在流超出实例算力，只能维持 "+inflMax+"/实例（prefill "+(Tpf*1000).toFixed(0)+" ms × "+infl+" 在流 = "+(100*infl*Tpf).toFixed(0)+"%）；吞吐已按 min(目标 "+infl+", "+inflMax+")="+inflMax+" 在流计，容量/带宽随之按可持续口径——若要满足目标在途，需加节点 / 降上下文 / 换更小模型（decode 占用 "+(100*decUtil).toFixed(0)+"%）"});
   chk.push(decUtil<=1 ? {c:"ok",t:"decode 吞吐占用 "+(100*decUtil).toFixed(0)+"%（"+infl+" 流 × "+tps+" tok/s ÷ 参考聚合 "+decAgg.toLocaleString()+" tok/s，"+nInst+"节点×"+g+"卡）"}
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
