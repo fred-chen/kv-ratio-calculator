@@ -306,10 +306,13 @@ function pdBestSplit(){
   }
   return {gp,gd,best,cP,cD};
 }
+let pdUserEdited=false;   // 用户手动改过 P/D 配比后，推荐不再自动覆盖（可点按钮重新委托）
 function applyPDBalance(force){
   const b=pdBestSplit();
   const curP=+$("pnodes").value||0, curD=+$("dnodes").value||0;
-  if(b.best && (force || (curP===0&&curD===0))){ $("pnodes").value=b.best.nP; $("dnodes").value=b.best.nD; }
+  if(b.best && (force || (curP===0&&curD===0) || (!pdUserEdited && (curP!==b.best.nP||curD!==b.best.nD)))){
+    $("pnodes").value=b.best.nP; $("dnodes").value=b.best.nD;
+  }
   calc();
 }
 function calc(){
@@ -602,8 +605,12 @@ function pdSyncUI(){
   $("inflight_lbl").textContent=on?"D 实例在途请求数":"单实例在途请求数";
   if(!on){ $("r_inst_l").textContent="个可承载实例"; $("r_rack_l").textContent="节点 / 实例"; }
 }
-$("pd").addEventListener("change",()=>{ pdSyncUI(); if($("pd").checked) applyPDBalance(false); else calc(); });
-$("pdbal").addEventListener("click",()=>applyPDBalance(true));
+function recalc(){ if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc(); }
+$("pnodes").addEventListener("input",()=>pdUserEdited=true);
+$("dnodes").addEventListener("input",()=>pdUserEdited=true);
+$("pd").addEventListener("change",()=>{ pdSyncUI(); pdUserEdited=false; if($("pd").checked) applyPDBalance(false); else calc(); });
+$("pdbal").addEventListener("click",()=>{ pdUserEdited=false; applyPDBalance(true); });
+document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
 pdSyncUI();
 if($("pd").checked) applyPDBalance(false); else calc();
 </script>
