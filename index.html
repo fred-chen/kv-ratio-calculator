@@ -95,11 +95,11 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <div class="hint" style="margin-top:4px">切换模型时两个精度自动置为<b>原生默认</b>：FP8 / FP4（NVFP4）权重模型 → KV 默认 FP8；BF16 权重模型 → KV 默认 BF16；手动改过的手动值保留。</div>
       <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，每个实例各持一份权重）</label>
       <div id="pdblock" style="display:none;margin-top:8px;padding:9px 11px;background:#fafbfc;border:1px solid var(--line);border-radius:8px">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;justify-content:space-between">
           <b style="font-size:13px">PD 配比</b>
           <label style="font-size:12.5px" title="Prefill 池节点数">P <input id="pnodes" type="number" value="0" min="0" step="1" style="width:52px;padding:5px 6px;text-align:center"></label>
           <label style="font-size:12.5px" title="Decode 池节点数">D <input id="dnodes" type="number" value="0" min="0" step="1" style="width:52px;padding:5px 6px;text-align:center"></label>
-          <span id="pdidle" style="font-size:11.5px;padding:5px 7px;border:1px dashed var(--line);border-radius:6px;background:#fff;color:var(--sub);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis"></span>
+          <span id="pdidle" style="font-size:12px;padding:5px 9px;border:1px dashed var(--line);border-radius:6px;background:#fff;color:var(--sub);flex:0 0 auto"></span>
         </div>
         <div style="margin-top:6px"><button id="pdbal" type="button" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">按算力均衡推荐</button></div>
         <div class="hint" id="pdhint" style="margin-top:5px"></div>
