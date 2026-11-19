@@ -208,16 +208,11 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
-    <b>并行形状代价（v1.9.15，按 NVLink/NVL72 带宽标定，系数固定不可调）</b>：不同形状的<b>理论</b> prefill 供给只取决于用满多少节点，差别在通信，按带宽比折算成「形状代价」乘在理想 prefill 时长上，作为形状排序键并用于 TTFT 判断；<b>该代价已进入吞吐与配比</b>：P 池有效供给 = 理想 ÷ 代价因子、D 池有效流 = 物理流 ÷ 代价因子，系统 λ 与 P/D 推荐都按有效值比较（默认 24/8：λ 5.00 → 2.96 req/s、在途上限 32 → 19 条）：
-    ① <b>TP 代价按等效 all-reduce 耗时算</b>：ring 上跨机链路占比 <b>f = 2×(跨机台数)/TP</b>（每过一台机 2 条链路）；域内跨 tray 仍走 NVLink（单跳 ≈1/0.9 倍），跨出 NVLink 域改走 IB（100 GB/s 对 900 GB/s → <b>9 倍</b>）。
-    耗时倍数 = <b>(1−f) + f×r</b>，再按「通信在 prefill 里的占比 35%」阻尼（MFU 50% 已含平均通信停顿，避免重复计入）：<b>形状倍数 = 1 + 0.35×(耗时倍数−1)</b>；
-    举例 TP16（跨 2 台机、IB）：f=12.5% → 耗时 ×2.0 → 形状 ×1.35；TP32（跨 4 台机、IB）：×2.5 → ×1.53；在 NVL72 域内跨 tray：TP16 → ×1.005（几乎无代价）。
-    <b>TP 上限</b>：取 <code>max(16, 每节点卡数, NVLink 域大小)</code> —— 即默认最多 2 台机，NVL72 型号（B100/B200/B300）可到 72 卡；这是工程约定（机内 NVSwitch 最便宜、跨 1 台可接受、再远应改用 PP/EP），可按部署实际调整。
-    ② <b>PP 流水气泡</b>：微批 M≈8 时流水效率 = M/(M+PP−1)，折算 <b>每级 ×(1+1/8)</b>（PP4 → 1.5、PP8 → 2.0）；
-    ③ 域大小按 GPU 型号判定：B100/B200/B300 → 72 卡（NVL72 整机柜，域内跨 tray 仍是 NVLink），A100/A800/H100/H200/H20/自定义 → 8 卡（单机 NVLink，跨机即 IB）。<br>
-    <b>decode 容量改为 HBM 带宽口径（v1.9.13）</b>：decode 是<b>访存受限</b>——每生成 1 个 token 都要把「激活权重」读一遍（MoE 只读激活专家，稠密模型即全部权重），再按在驻并发各读一遍其 KV。故每实例可承载流数
-    <b>≈ (实例卡数 × 单卡 HBM 带宽 ÷ 目标 tps − 激活权重 GB) ÷ (每流在驻 KV GB)</b>，其中每流在驻 KV = 单请求 KV × TP 复制系数 × 50% 常驻。输入「单卡 HBM 带宽」缺省 3.35 TB/s（H100），H200 4.8、B200 8.0、A100 2.0；选 GPU 型号会自动带出。
-    由此可得三条工程结论：<b>目标 tps 越高、上下文越长、KV 精度越高，可承载流越少</b>；<b>权重越大，每步固定开销越大，decode 越难摊薄</b>；<b>要提并发只能加卡/换高带宽卡/降 tps</b>。旧的「350 tok/s/卡」锚值已停用（原为 H100 级 32 卡实例聚合 11,200 tok/s 的外推值，属乐观估计）。<br>
+    <b>超节点拓扑与并行形状代价（v1.9.16，系数固定不可调）</b>：<b>1 个 NV 域 = 256 卡</b>（32 节点 × 8 卡；64 节点 = 2 个 NV 域，依次类推）；域内跨节点仍走 NVLink 交换，<b>跨域走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 约 2.25×）</b>。
+    <b>TP 上限 = 256 卡（= 1 个 NV 域、32 节点）</b>，同一实例尺寸会把 TP16×PP4 / TP32×PP2 / TP64×PP1 等多套合法并行都纳入比较。
+    <b>TP 代价</b>：ring 上跨机链路占比 f=2×跨机台数÷TP（每过一台机 2 条）；域内单跳 ≈1.11×、跨域单跳 ≈2.25×，得 all-reduce 耗时倍数，再按「通信占 prefill 的 35%」阻尼（MFU 50% 已含平均通信停顿）：<b>倍数 = 1 + 0.35×(耗时倍数−1)</b>。
+    <b>PP 代价</b>：流水气泡只对 ≥2 级生效，微批 M≈8 时每多一级 <b>×(1+1/8)</b>。
+    该代价用于：① 池内选形状；② P 有效供给 = 理想供给 ÷ 倍数、D 有效流 = 物理流 ÷ 倍数；③ 系统 λ 与 PD 配比推荐都按有效值比较。<b>注意</b>：TP 超过 KV 头数会导致 KV 复制系数 rep=⌈TP÷KV头数⌉ 增大（本例 TP64 时 rep=16，D 池显存可驻数因此降到 62 条）。<br>
     <b>KV 水位阈值 70%</b>：超过即建议扩容或降压在途（工程经验阈值）。<br>
     <b>容量单位口径</b>：本页面 GB/TB 均为 10⁹/10¹² 字节；厂商标称显存若按 GiB 计，结果偏保守约 7%。<br>
     <b>索引器键缓存统一为 MQA 单键（v1.5）</b>：DSA/MSA 稀疏注意力的 index 键缓存按"拥有层 × 128 维单键"计（32/64 个 index 头是查询侧概念，不复制键；拥有层数取 config 的 indexer_types(full)/sparse_attention_freq/层列表），DeepSeek-V3.2 实测口径验证（61 层全索引 → 35,136+7,808=42,944 元素/token）。<b>MiMo-V2.6 为混合滑窗架构</b>：9(10) 全层 + 39(60) 个 128-token 窗口层，窗口缓存转每序列快照。<br>
@@ -250,11 +245,13 @@ const $ = id => document.getElementById(id);
 // 域内跨 tray 仍走 NVLink（带宽不变，只多 1 跳 ≈1–2 µs + 交换机拥塞）→ 每跨 1 台机 +3%
 // 跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡，相对 NVLink 慢 ≈9×）→ 每跨 1 台机 +60%（保守）
 // PP：微批 M≈8 时流水效率 = M/(M+PP−1) → 每加 1 级 ≈ 1/M ≈ +12%
-const NV_DOMAIN=72, NV_BW=900, IB_BW=100, NV_LINK_EFF=0.90, PP_PEN=1/8;
+// —— 超节点拓扑假设：1 个 NV 域 = 256 卡（32 节点 × 8 卡）；域内跨节点仍走 NVLink 交换，跨域走 3.2 Tbps RDMA ——
+const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
 // 通信在 prefill 时长中的占比：MFU=50% 已含平均通信/停顿，这里只叠加「形状差异」那部分，避免重复计入
 const COMM_SHARE=0.35;
 // 哪个型号处在 NVL72 域：B100/B200/B300 是 NVLink5 整机柜；其余（A100/A800/H100/H200/H20/自定义）按单机 NVLink、跨机走 IB
-function nvDomain(){ const i=+$("gpu").value; return (i===7||i===8||i===9) ? NV_DOMAIN : 8; }
+function nvDomain(){ return NV_DOMAIN_GPUS; }                       // 卡数：1 个 NV 域 256 卡
+function nvDomainNodes(g){ return Math.max(1, Math.floor(NV_DOMAIN_GPUS/Math.max(1,g))); }   // 域内节点数（8 卡/节点 → 32）
 const sel = $("model");
 MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n+(m.cls==="hybrid"?"（混合线性）":m.cls==="mla"?"（MLA）":"（GQA）");sel.appendChild(o);});
 sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
@@ -297,7 +294,7 @@ const GCACHE=new Map();
 function legalGrids(m,g,s){
   const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
   // TP 上限 = 该 GPU 的 NVLink 域大小（NVL72 型号可到 72 卡），至少允许 2 台机（max(16,g)）
-  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];
+  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
   for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:Math.max(1,Math.ceil(t/kvHeads))}); }
   if(!out.length) return out;
   const pref=out.filter(x=>x.tp<=tpMax), pool=(pref.length?pref:out.slice());
@@ -310,7 +307,9 @@ function legalGrids(m,g,s){
 function legalList(m,g,maxS){
   const key=m.n+"|"+g+"|L"+maxS; const hit=GCACHE.get(key); if(hit) return hit;
   const out=[];
-  for(let s=1;s<=maxS;s++){ const gs=legalGrids(m,g,s); if(gs.length) out.push({s,g0:gs[0]}); }
+  // 同一实例尺寸可有多套合法并行（如 TP16×PP4 / TP32×PP2 / TP64×PP1），都纳入比较，由形状代价选优
+  for(let s=1;s<=maxS;s++){ const gs=legalGrids(m,g,s); if(!gs.length) continue;
+    gs.slice(0, s<=64?3:1).forEach(g0=>out.push({s,g0})); }   // 小实例（≤64 节点）才展开多套并行，控住大集群开销
   GCACHE.set(key,out); return out;
 }
 function dAt(m,g,hbm,pf,tps,S,W,b,C,legal,bwH,A_GB){   // D 池：可服务并发流（HBM 带宽口径）
@@ -337,13 +336,15 @@ function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH){
 }
 // 形状代价：跨机 TP 的 all-reduce + PP 流水气泡，乘在「理想 prefill 时长」上，用于比较不同并行形状
 function shapeFactor(tp, pp, g){
-  const hops=Math.max(0, Math.ceil(tp/g)-1);              // 跨了几台机（机内 TP 记 0）
-  const f=Math.min(0.5, 2*hops/Math.max(2,tp));            // ring all-reduce 上「跨机链路」占比（每过一台机 2 条）
-  // r = 跨机链路的「单跳耗时倍数」：域内跨 tray 走 NVLink（≈1/0.9），跨出域走 IB（带宽 100 vs NVLink 900 → 9×）
-  const r=(tp<=nvDomain()) ? 1/NV_LINK_EFF : NV_BW/IB_BW;
-  const tpFac=(1-f)+f*r;                                   // all-reduce 耗时的相对倍数
-  const tpEff=1+COMM_SHARE*(tpFac-1);                      // 只让通信占比那部分放大 prefill 时长
-  return tpEff*(1+PP_PEN*pp);                              // × PP 流水气泡（每级 1/8）
+  const hops=Math.max(0, Math.ceil(tp/g)-1);               // TP 跨了几台机（机内 TP 记 0）
+  const domNodes=nvDomainNodes(g);                          // 一个 NV 域覆盖多少台机（256/8 = 32）
+  const hopsIn=Math.min(hops, Math.max(0,domNodes-1));      // 域内跨机（仍走 NVLink 交换）
+  const hopsOut=Math.max(0, hops-(domNodes-1));             // 跨出 NV 域（走 3.2 Tbps RDMA）
+  const fIn=Math.min(0.5, 2*hopsIn/Math.max(2,tp)), fOut=Math.min(0.5, 2*hopsOut/Math.max(2,tp));
+  const rIn=1/NV_LINK_EFF, rOut=NV_BW/RDMA_BW;              // 单跳耗时倍数：域内 ≈1.11；跨域 900/(3.2Tbps=400GB/s)=2.25
+  const tpFac=(1-fIn-fOut)+fIn*rIn+fOut*rOut;               // all-reduce 耗时的相对倍数
+  const tpEff=1+COMM_SHARE*(tpFac-1);                       // 只让通信占比那部分放大 prefill 时长
+  return tpEff*(1+PP_PEN*Math.max(0,pp-1));                 // × PP 流水气泡（PP=1 无气泡；每多一级 +1/8）
 }
 function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12) return a[i]-b[i]; } return 0; }
 // 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
