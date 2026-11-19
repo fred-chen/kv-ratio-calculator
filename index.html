@@ -146,6 +146,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <div><b id="r_inst">–</b> <span id="r_inst_l">个可承载实例</span></div>
       <div><b id="r_rack">–</b> <span id="r_rack_l">节点 / 实例</span></div>
       <div>单 token KV <b id="r_stok">–</b> <span id="r_stoku"></span></div>
+      <div><b id="r_capin">–</b> <span id="r_capin_l">条在途上限（算力）</span></div>
     </div>
     <div class="card" style="margin-top:14px"><h2>卸载设备明细（带宽已按峰值口径计入上方）</h2>
       <table><tbody>
@@ -503,6 +504,8 @@ function calc(){
   const sTokMB = sTokB/1e6;
   if(sTokMB>=0.01){ $("r_stok").textContent=sTokMB.toLocaleString("zh",{maximumFractionDigits:4}); $("r_stoku").textContent="MB/token（单请求 "+humanGB(S_GB)+"）"; }
   else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
+  $("r_capin").textContent = (grid && inflMax) ? (inst*inflMax) : "–";   // PD 分支会在下面覆盖为 D 池三面上限
+  $("r_capin_l").textContent = grid ? ("条在途上限（"+((Tsvc/Tpf)<=(decAgg/tps)?"prefill 算力":"decode 聚合")+" 受限）") : "条在途上限（算力）";
   const pdSum = (pd&&pdP&&pdD) ? pdP.nodes+pdD.nodes : 0;
   const ok = pd ? !!(pdP&&pdD&&pdSum<=nodes&&lam>0) : !!(grid&&inst>0);   // 可部署判据
   const thEff = (ok && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长（PD 也适用）
@@ -568,9 +571,10 @@ function calc(){
       ? "需求参数：需求 "+infl+" 已超本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐"
       : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）";
     $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+Math.min(infl,pdD.capAll)+"）";
+    $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
-    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（decode/显存不足）":"需求并发封顶（两池仍有余量）");
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（decode/显存不足）":"需求并发封顶（两池仍有余量）");
     if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
     hs=hs.replace(/ ｜ $/,"");
     if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
