@@ -207,7 +207,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
-    <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
+    <b>并行网格偏好</b>：TP ≤ <b>256 卡（1 个 NV 域）</b>、PP ≤ 8；域内跨节点 TP 属正常形态（NVLink 交换），超出 NV 域才警示并计入跨域 RDMA 代价；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
     <b>超节点拓扑与并行形状代价（v1.9.16，系数固定不可调）</b>：<b>1 个 NV 域 = 256 卡</b>（32 节点 × 8 卡；64 节点 = 2 个 NV 域，依次类推）；域内跨节点仍走 NVLink 交换，<b>跨域走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 约 2.25×）</b>。
     <b>TP 上限 = 256 卡（= 1 个 NV 域、32 节点）</b>，同一实例尺寸会把 TP16×PP4 / TP32×PP2 / TP64×PP1 等多套合法并行都纳入比较。
     <b>TP 代价</b>：ring 上跨机链路占比 f=2×跨机台数÷TP（每过一台机 2 条）；域内单跳 ≈1.11×、跨域单跳 ≈2.25×，得 all-reduce 耗时倍数，再按「通信占 prefill 的 35%」阻尼（MFU 50% 已含平均通信停顿）：<b>倍数 = 1 + 0.35×(耗时倍数−1)</b>。
@@ -243,13 +243,14 @@ const $ = id => document.getElementById(id);
 // —— 并行形状代价：按 NVLink 带宽标定（写死在固定假设里，界面不可调）——
 // NVLink5：每卡 900 GB/s/向（1.8 TB/s 双向）；NVL72 单域 72 卡、域内聚合 130 TB/s
 // 域内跨 tray 仍走 NVLink（带宽不变，只多 1 跳 ≈1–2 µs + 交换机拥塞）→ 每跨 1 台机 +3%
-// 跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡，相对 NVLink 慢 ≈9×）→ 每跨 1 台机 +60%（保守）
+// 跨出 NV 域改走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 ≈2.25×）
+
 // PP：微批 M≈8 时流水效率 = M/(M+PP−1) → 每加 1 级 ≈ 1/M ≈ +12%
 // —— 超节点拓扑假设：1 个 NV 域 = 256 卡（32 节点 × 8 卡）；域内跨节点仍走 NVLink 交换，跨域走 3.2 Tbps RDMA ——
 const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
 // 通信在 prefill 时长中的占比：MFU=50% 已含平均通信/停顿，这里只叠加「形状差异」那部分，避免重复计入
 const COMM_SHARE=0.35;
-// 哪个型号处在 NVL72 域：B100/B200/B300 是 NVLink5 整机柜；其余（A100/A800/H100/H200/H20/自定义）按单机 NVLink、跨机走 IB
+// 域大小按超节点拓扑固定为 256 卡（与 GPU 型号无关）：域内跨节点走 NVLink 交换，跨域走 RDMA
 function nvDomain(){ return NV_DOMAIN_GPUS; }                       // 卡数：1 个 NV 域 256 卡
 function nvDomainNodes(g){ return Math.max(1, Math.floor(NV_DOMAIN_GPUS/Math.max(1,g))); }   // 域内节点数（8 卡/节点 → 32）
 const sel = $("model");
@@ -293,7 +294,7 @@ const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})
 const GCACHE=new Map();
 function legalGrids(m,g,s){
   const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
-  // TP 上限 = 该 GPU 的 NVLink 域大小（NVL72 型号可到 72 卡），至少允许 2 台机（max(16,g)）
+  // TP 上限 = 1 个 NV 域（256 卡）；同时至少允许 2 台机（max(16,g)）
   const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
   for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:Math.max(1,Math.ceil(t/kvHeads))}); }
   if(!out.length) return out;
@@ -424,7 +425,7 @@ function bestUtilSplit(){
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
     const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) continue;
-    const Creq=Math.max(1,Math.round(pP.supply*nout/tps));       // 打满 P 所需并发（物理口径）
+    const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条       // 打满 P 所需并发（物理口径）
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
     const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
     const gap=Math.abs(Creq-dP.streams);
@@ -679,7 +680,8 @@ function calc(){
     if(nInst>nMemEff) chk.push({c:"warn",t:"显存只需 "+nMemEff+" 节点，但 TP×PP 整除不满足，已上调至 "+nInst+" 节点（TP"+grid[0]+"×PP"+grid[1]+"）"});
     if(inst>=1) chk.push({c:"ok",t:"显存口径可部署 "+inst+" 个实例（每实例 "+nInst+" 节点，TP"+grid[0]+"×PP"+grid[1]+(rep>1?"，KV 每实例复制 ×"+rep:"")+"）"});
     else chk.push({c:"bad",t:"最小合法实例 "+nInst+" 节点 > 总节点 "+nodes+"：加节点 / 降在途 / 降权重位宽 / 减上下文"});
-    if(grid[0]>g) chk.push({c:"warn",t:"TP"+grid[0]+" 跨 "+(grid[0]/g)+" 节点（超出单机 NVLink 域），依赖高速跨机张量并行"});
+    if(grid[0]>nvDomain()) chk.push({c:"bad",t:"TP"+grid[0]+" 超出 1 个 NV 域（"+nvDomain()+" 卡）→ 需跨域 3.2 Tbps RDMA，通信代价陡增"});
+    else if(grid[0]>g) chk.push({c:"ok",t:"TP"+grid[0]+" 跨 "+(grid[0]/g)+" 节点，仍在同一 NV 域内（256 卡/域，域内走 NVLink 交换）"});
     if(grid[1]>8) chk.push({c:"bad",t:"PP"+grid[1]+" 超出建议上限 8：单请求须穿越 "+grid[1]+" 段流水线，本拓扑不建议直接上线——结果仅作容量测算，部署需引入 EP/DP 或降低在途/上下文（页面未搜索 EP/DP 拓扑）"});
   }
   if(m.ctx && ctx>m.ctx) chk.push({c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超模型上限 "+m.ctx.toLocaleString()+"，结果仅供参考"});
@@ -808,7 +810,7 @@ function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const ttftMs=Math.max(1,+$("ttft").value||500);
   const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) return null;
-  const Creq=Math.max(1,Math.round(pP.supply*nout/tps));
+  const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条
   const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP) return null;
   return Math.max(1,Math.round(Math.min(Creq,dP.streams)));
 }
