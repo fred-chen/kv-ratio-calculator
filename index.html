@@ -412,6 +412,19 @@ function singlePlan(m,g,hbm,pf,fl,tps,nout,S,W,nodes,C,bwH,A_GB){
   return null;
 }
 // —— PD 配比推荐：给定总并发 C，D 只需够服务 C，其余节点给 P（λ=min(D 并发、P 供给) 最大）——
+// 推荐配比必须与「按该配比重算」一致：supplyAt/dAt 返回实际用到 used，迭代到不动点
+function stabilizeSplit(nP0,nD0,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs){
+  let nP=nP0, nD=nD0;
+  for(let i=0;i<8;i++){
+    const pP=supplyAt(m,g,hbm,pf,fl,Math.max(1,nP),nodes,legal,ttftMs,W);
+    const dP=dAt(m,g,hbm,pf,tps,S,W,Math.max(1,nD),C,legal,bwH,A_GB);
+    if(!pP||!dP||pP.supply<=0||dP.streams<=0) return null;
+    const nP2=pP.used, nD2=dP.used;
+    if(nP2===nP && nD2===nD) return {nP,nD,pP,dP};
+    nP=nP2; nD=nD2;
+  }
+  return null;
+}
 function pdBestSplit(){
   const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
   const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
@@ -440,6 +453,8 @@ function pdBestSplit(){
       best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
   }
   if(!best||best.l<=1e-9) return {best:null,minD,minN};
+  { const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs);
+    if(st){ best.nP=st.nP; best.nD=st.nD; best.l=Math.min(st.dP.eff*tps/nout, st.pP.supplyEff); best.pInst=st.pP.k; best.dInst=st.dP.k; best.sP=st.pP.s; best.sD=st.dP.s; } }
   return {best,minD,minN};
 }
 // —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
@@ -467,6 +482,11 @@ function bestUtilSplit(){
        (tie&&usedSum===best.usedSum&&waste===best.waste&&pP.supplyEff>best.pEff+1e-12) ||
        (tie&&usedSum===best.usedSum&&waste===best.waste&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&gap<best.gap))
       best={nP:pP.used,nD:dP.used,C,lam,gap,usedSum,waste,pEff:pP.supplyEff};
+  }
+  if(best){
+    const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,Math.max(1,Math.round(+$("inflight").value||40)),ttftMs);
+    if(st){ const C2=Math.max(1,Math.min(Math.floor(st.pP.supply*nout/tps), st.dP.streams, Math.floor(st.pP.supplyEff*nout/tps)));
+      best.nP=st.nP; best.nD=st.nD; best.C=C2; best.lam=Math.min(C2*tps/nout/st.dP.fac, st.pP.supplyEff); }
   }
   return {best,minN};
 }
