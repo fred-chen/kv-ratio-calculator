@@ -653,10 +653,16 @@ function calc(){
                             : "需求参数：需求 "+infl+" 已超<b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）—— 超出部分不产生吞吐，容量按 "+(inst*inflMax)+" 计");
   $("d_inflmax").textContent = grid ? ((inst*inflMax)+" 条（每实例 "+inflMax+" × "+inst+" 实例；受限项："+((Tsvc/Tpf)<=decCapI?"prefill 算力":"decode 带宽")+"；需求 "+infl+" → 有效 "+Ceff+"）") : dash;
   $("d_work").textContent = grid ? (humanGB(capWork)+(Ceff<infl?"（按有效并发 "+Ceff+"/"+infl+"）":"")) : dash;
-  if(pd && (!pdP||!pdD)){
+  if(pd && (!pdP||!pdD||((pdP&&pdD)&&(pdP.nodes+pdD.nodes>nodes)))){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
     let why;
-    if(nP<=0||nD<=0) why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入 P / D 节点数"+(pdRec&&pdRec.minN?"；按当前节点配置，两池最少需要 "+pdRec.minN+" 节点（P+D）":"");
+    if(nP<=0||nD<=0){
+      const bud=g*hbm*UTIL, szs=[...new Set(legalList(m,g,Math.max(64,nodes)).map(x=>x.s))].sort((a,b)=>a-b);
+      const pMin=szs.find(sz=>Weff<=sz*bud)||0;
+      const dMin=szs.find(sz=>{ const q=dAt(m,g,hbm,pf,tps,S_GB,Weff,sz,infl,legalList(m,g,sz),bwH,A_GB); return q&&q.streams>0; })||0;
+      why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入"+
+          (pMin&&dMin? "；按当前配置，P 池至少 "+pMin+" 节点、D 池至少 "+dMin+" 节点，两池合计至少 "+(pMin+dMin)+" 节点（当前总节点 "+nodes+"）" : "");
+    }
     else if(!pdP) why="P 池 "+nP+" 节点无法形成可部署实例 —— "+whyNoInst(m,g,hbm,Weff,nP).replace(/当前每节点/g,"每节点").replace(/→ 另一条路.*$/,"");
     else if(!pdD) why="D 池 "+nD+" 节点无法形成可部署实例（decode 还要常驻在途 KV，比只放权重更吃显存）—— "+whyNoInst(m,g,hbm,Weff,nD).replace(/→ 另一条路.*$/,"");
     else why="P 池或 D 池供给为 0";
@@ -908,6 +914,13 @@ $("ctxmode").addEventListener("change",()=>{ const d=$("ctxmode").value==="dist"
   recalc(); });
 $("ctxsingle").style.display=$("ctxmode").value==="dist"?"none":"block";
 $("ctxdist").style.display=$("ctxmode").value==="dist"?"flex":"none";
+// 结构参数一变（节点数 / 每节点卡数 / GPU 型号 / 单卡显存），PD 配比必须重解
+function reSolvePD(){
+  if(!$("pd").checked) return;
+  pdUserEdited=false; inflUserEdited=false;
+  if(!autoDemand(true)){ $("pnodes").value=0; $("dnodes").value=0; calc(); }
+}
+["nodes","g","gpu","hbm"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("input",reSolvePD); });
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
 pdSyncUI();
 autoDemand(true);
