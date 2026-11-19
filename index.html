@@ -209,8 +209,10 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
     <b>并行形状代价（v1.9.15，按 NVLink/NVL72 带宽标定，系数固定不可调）</b>：不同形状的<b>理论</b> prefill 供给只取决于用满多少节点，差别在通信，按带宽比折算成「形状代价」乘在理想 prefill 时长上，作为形状排序键并用于 TTFT 判断；<b>该代价已进入吞吐与配比</b>：P 池有效供给 = 理想 ÷ 代价因子、D 池有效流 = 物理流 ÷ 代价因子，系统 λ 与 P/D 推荐都按有效值比较（默认 24/8：λ 5.00 → 2.96 req/s、在途上限 32 → 19 条）：
-    ① <b>TP 代价按等效带宽算</b>：ring all-reduce 上跨机链路占比 <b>f = 2×(跨机台数)/TP</b>（每过一台机 2 条链路）；域内跨 tray 仍走 NVLink（按 0.9 折），跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡）。等效倍数 = <b>1 ÷ ((1−f) + f×(100/900))</b>；
-    举例 TP16（跨 2 台机）：f=12.5% → 1÷(0.875+0.0139) ≈ <b>1.13</b>；TP32（跨 4 台机）：f=18.8% → ≈ <b>1.20</b>；
+    ① <b>TP 代价按等效 all-reduce 耗时算</b>：ring 上跨机链路占比 <b>f = 2×(跨机台数)/TP</b>（每过一台机 2 条链路）；域内跨 tray 仍走 NVLink（单跳 ≈1/0.9 倍），跨出 NVLink 域改走 IB（100 GB/s 对 900 GB/s → <b>9 倍</b>）。
+    耗时倍数 = <b>(1−f) + f×r</b>，再按「通信在 prefill 里的占比 35%」阻尼（MFU 50% 已含平均通信停顿，避免重复计入）：<b>形状倍数 = 1 + 0.35×(耗时倍数−1)</b>；
+    举例 TP16（跨 2 台机、IB）：f=12.5% → 耗时 ×2.0 → 形状 ×1.35；TP32（跨 4 台机、IB）：×2.5 → ×1.53；在 NVL72 域内跨 tray：TP16 → ×1.005（几乎无代价）。
+    <b>TP 上限</b>：取 <code>max(16, 每节点卡数, NVLink 域大小)</code> —— 即默认最多 2 台机，NVL72 型号（B100/B200/B300）可到 72 卡；这是工程约定（机内 NVSwitch 最便宜、跨 1 台可接受、再远应改用 PP/EP），可按部署实际调整。
     ② <b>PP 流水气泡</b>：微批 M≈8 时流水效率 = M/(M+PP−1)，折算 <b>每级 ×(1+1/8)</b>（PP4 → 1.5、PP8 → 2.0）；
     ③ 域大小按 GPU 型号判定：B100/B200/B300 → 72 卡（NVL72 整机柜，域内跨 tray 仍是 NVLink），A100/A800/H100/H200/H20/自定义 → 8 卡（单机 NVLink，跨机即 IB）。<br>
     <b>decode 容量改为 HBM 带宽口径（v1.9.13）</b>：decode 是<b>访存受限</b>——每生成 1 个 token 都要把「激活权重」读一遍（MoE 只读激活专家，稠密模型即全部权重），再按在驻并发各读一遍其 KV。故每实例可承载流数
@@ -249,6 +251,8 @@ const $ = id => document.getElementById(id);
 // 跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡，相对 NVLink 慢 ≈9×）→ 每跨 1 台机 +60%（保守）
 // PP：微批 M≈8 时流水效率 = M/(M+PP−1) → 每加 1 级 ≈ 1/M ≈ +12%
 const NV_DOMAIN=72, NV_BW=900, IB_BW=100, NV_LINK_EFF=0.90, PP_PEN=1/8;
+// 通信在 prefill 时长中的占比：MFU=50% 已含平均通信/停顿，这里只叠加「形状差异」那部分，避免重复计入
+const COMM_SHARE=0.35;
 // 哪个型号处在 NVL72 域：B100/B200/B300 是 NVLink5 整机柜；其余（A100/A800/H100/H200/H20/自定义）按单机 NVLink、跨机走 IB
 function nvDomain(){ const i=+$("gpu").value; return (i===7||i===8||i===9) ? NV_DOMAIN : 8; }
 const sel = $("model");
@@ -291,8 +295,9 @@ const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})
 // —— 布局工具：合法并行网格 / 单池规划（P 按吞吐、D 按并发）——
 const GCACHE=new Map();
 function legalGrids(m,g,s){
-  const key=m.n+"|"+g+"|"+s; const hit=GCACHE.get(key); if(hit) return hit;
-  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g), N=s*g, out=[];
+  const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
+  // TP 上限 = 该 GPU 的 NVLink 域大小（NVL72 型号可到 72 卡），至少允许 2 台机（max(16,g)）
+  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];
   for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:Math.max(1,Math.ceil(t/kvHeads))}); }
   if(!out.length) return out;
   const pref=out.filter(x=>x.tp<=tpMax), pool=(pref.length?pref:out.slice());
@@ -334,9 +339,11 @@ function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH){
 function shapeFactor(tp, pp, g){
   const hops=Math.max(0, Math.ceil(tp/g)-1);              // 跨了几台机（机内 TP 记 0）
   const f=Math.min(0.5, 2*hops/Math.max(2,tp));            // ring all-reduce 上「跨机链路」占比（每过一台机 2 条）
-  const r=(tp<=nvDomain()) ? NV_LINK_EFF : IB_BW/NV_BW;    // 域内跨 tray 走 NVLink（约 0.9）；跨域走 IB（100/900）
-  const tpFac=1/((1-f)+f*r);                               // 等效 all-reduce 带宽下降倍数
-  return tpFac*(1+PP_PEN*pp);                              // × PP 流水气泡（每级 1/8）
+  // r = 跨机链路的「单跳耗时倍数」：域内跨 tray 走 NVLink（≈1/0.9），跨出域走 IB（带宽 100 vs NVLink 900 → 9×）
+  const r=(tp<=nvDomain()) ? 1/NV_LINK_EFF : NV_BW/IB_BW;
+  const tpFac=(1-f)+f*r;                                   // all-reduce 耗时的相对倍数
+  const tpEff=1+COMM_SHARE*(tpFac-1);                      // 只让通信占比那部分放大 prefill 时长
+  return tpEff*(1+PP_PEN*pp);                              // × PP 流水气泡（每级 1/8）
 }
 function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12) return a[i]-b[i]; } return 0; }
 // 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
