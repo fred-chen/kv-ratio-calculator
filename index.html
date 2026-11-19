@@ -203,6 +203,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>容量与忙闲无关（v1.9.1）</b>：容量估算<b>永远按给定的 KV 保留窗口全量保留</b>——即按最忙时段（窗口内满载）的写入速率 × 窗口 × 1.2 计，不受忙闲时段长短或闲时负荷影响。忙闲分时负荷<b>只作用于日写入量</b>（日均写入 = 峰值写带宽 × 86400 × w），进而影响磨损寿命与「期待寿命反推保底容量」。因此改忙时段只会改变寿命，不会改变容量 KPI（除非触发磨损保底主导）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，<b>留空时为 3 年</b>）即以<b>红字标风险</b>。<br>
     <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
+    <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（decode 350 tok/s/卡、prefill MFU 50%），池间隔离后锚值有望更高，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
     <b>decode 聚合吞吐参考 dec_agg = 350 tok/s/卡 × 实例 GPU 数 × (算力÷2.0)</b>：350 tok/s/卡 为 H100 级 32 卡实例聚合 11,200 tok/s 的外推值【假设】；decode 是访存受限而非算力受限，此值属粗略参考，务必以实测替换。<br>
     <b>KV 水位阈值 70%</b>：超过即建议扩容或降压在途（工程经验阈值）。<br>
@@ -466,7 +467,8 @@ function calc(){
              streams:dPl.streams, perInst:dPl.perInst,
              inflD:Math.min(dPl.perInst, Math.floor(dPl.decI/tps), Math.max(0,dPl.memMax)), lD:dPl.streams*tps/nout};
       lam = Math.min(pdD.lD, pPl.supply);
-      pdP.bott = pPl.supply < pdD.lD-1e-9 ? "P" : (pdD.lD < pPl.supply-1e-9 ? "D" : "均衡");
+      // 瓶颈归属：P 供给不足 → "P"；D 算力不足（没吃满需求并发）→ "D"；D 已吃满需求、λ 由需求封顶 → "需求"
+      pdP.bott = (pPl.supply <= pdD.lD+1e-9) ? "P" : (dPl.streams < infl-1e-9 ? "D" : "需求");
     }
   } else if(sp){
     lam = sp.streams/sp.Tsvc;
@@ -628,8 +630,8 @@ function calc(){
                      : {c:"bad",t:"decode 吞吐不足 "+(100*decUtil).toFixed(0)+"%：聚合 decode 参考上限 "+decAgg.toFixed(0)+" tok/s（随算力线性缩放，需以实测替换）"});
   }
   if(pd&&pdP&&pdD){
-    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
-    chk.push({c:pdD.bott==="D"?"warn":(pdP.bott==="P"?"ok":"ok"),t:"D 池（"+pdD.nodes+" 节点 → "+pdD.inst+" 实例 × "+pdD.gd.nodes+"，TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）：decode 供给 "+pdD.lD.toFixed(2)+" req/s（每 D 实例在途 "+pdD.inflD+"，KV 水位按 "+pdD.gd.rep+"× 复制），占用 "+(100*decUtilV).toFixed(0)+"%"+(pdP.bott==="D"?" ← 系统瓶颈":"")});
+    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈（P 池）":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
+    chk.push({c:pdP.bott==="D"?"warn":"ok",t:"D 池（"+pdD.nodes+" 节点 → "+pdD.inst+" 实例 × "+pdD.gd.nodes+"，TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）：decode 供给 "+pdD.lD.toFixed(2)+" req/s（每 D 实例在途 "+pdD.inflD+"，KV 水位按 "+pdD.gd.rep+"× 复制），占用 "+(100*decUtilV).toFixed(0)+"%"+(pdP.bott==="D"?" ← 系统瓶颈（D 池）":(pdP.bott==="需求"?" ← 受需求并发限（两池仍有余量）":""))});
     const sPD=pdP.nodes+pdD.nodes;
     if(sPD>nodes) chk.push({c:"bad",t:"P+D 节点数 "+sPD+" 超过总节点 "+nodes+"：超出 "+(sPD-nodes)+" 节点无法部署，请调整配比"});
     else if(sPD<nodes) chk.push({c:"warn",t:"P+D 节点数 "+sPD+" 少于总节点 "+nodes+"：有 "+(nodes-sPD)+" 节点闲置，可点「按算力均衡推荐」重新分配"});
@@ -655,7 +657,6 @@ function calc(){
       : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
     else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
   }
-  if(pd) chk.push({c:"warn",t:"PD 双池：<b>每个实例各持一份完整权重（P、D 实例之间不共享）</b>，全系统权重 = 实例总数 × 单份（本例 P "+((pdP&&pdP.inst)||0)+" + D "+((pdD&&pdD.inst)||0)+" = "+(((pdP&&pdP.inst)||0)+((pdD&&pdD.inst)||0))+" 份）——显存是按<b>每实例 1 份</b>核算的；吞吐按保守锚计算（decode 350 tok/s/卡、prefill MFU 0.5），池间隔离后锚值有望更高——实际 tps/λ 上限可优于本页结果"});
   const chkBad=chk.filter(x=>x.c!=="ok"), chkOk=chk.filter(x=>x.c==="ok");
   $("r_chk").innerHTML = (chkBad.length
       ? chkBad.map(x=>`<li class="${x.c}">${x.t}</li>`).join("")
