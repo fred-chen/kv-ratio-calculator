@@ -421,23 +421,25 @@ function pdBestSplit(){
   const W=m.W*bwv, tps=Math.max(0.5,+$("tps").value||80), ttftMs=Math.max(1,+$("ttft").value||500);
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
-  let best=null, minD=0;
+  let best=null, minD=0, minN=0;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB), pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
     if(!dP||!pP) continue;
     if(dP.streams>0 && !minD) minD=nD;
+    if(dP.streams>0 && pP.supply>0 && (!minN||pP.used+dP.used<minN)) minN=pP.used+dP.used;
     if(dP.streams<=0||pP.supply<=0) continue;
     const l=Math.min(dP.eff*tps/nout, pP.supplyEff);      // 形状代价后可达 λ
-    const usedSum=pP.used+dP.used;
-    if(!best){ best={nP,nD,l,used:nP+nD,usedSum,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s}; continue; }
+    const usedSum=pP.used+dP.used, waste=(nP-pP.used)+(nD-dP.used);
+    if(!best){ best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s}; continue; }
     const tie=Math.abs(l-best.l)<=1e-12;
-    if(l>best.l+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&pP.supplyEff>best.pEff+1e-12) ||
-       (tie&&usedSum===best.usedSum&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&nD<best.nD))
-      best={nP,nD,l,used:nP+nD,usedSum,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
+    if(l>best.l+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&waste<best.waste) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&nD<best.nD))
+      best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
   }
-  if(!best||best.l<=1e-9) return {best:null,minD};
-  return {best,minD};
+  if(!best||best.l<=1e-9) return {best:null,minD,minN};
+  return {best,minD,minN};
 }
 // —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
 function bestUtilSplit(){
@@ -449,21 +451,23 @@ function bestUtilSplit(){
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const ttftMs=Math.max(1,+$("ttft").value||500);
-  let best=null;
+  let best=null, minN=0;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
     const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W); if(!pP||pP.supply<=0) continue;
     const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条       // 打满 P 所需并发（物理口径）
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
     const C=Math.max(1,Math.min(Creq, dP.streams, Math.floor(pP.supplyEff*nout/tps))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
-    const usedSum=pP.used+dP.used, gap=Math.abs(Creq-dP.streams);
-    if(!best){ best={nP,nD,C,lam,gap,usedSum,pEff:pP.supplyEff}; continue; }
+    const usedSum=pP.used+dP.used, gap=Math.abs(Creq-dP.streams), waste=(nP-pP.used)+(nD-dP.used);
+    if(!minN||pP.used+dP.used<minN) minN=pP.used+dP.used;
+    if(!best){ best={nP:pP.used,nD:dP.used,C,lam,gap,usedSum,waste,pEff:pP.supplyEff}; continue; }
     const tie=Math.abs(lam-best.lam)<=1e-12;
-    if(lam>best.lam+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&pP.supplyEff>best.pEff+1e-12) ||
-       (tie&&usedSum===best.usedSum&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&gap<best.gap))
-      best={nP,nD,C,lam,gap,usedSum,pEff:pP.supplyEff};
+    if(lam>best.lam+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&waste<best.waste) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&gap<best.gap))
+      best={nP:pP.used,nD:dP.used,C,lam,gap,usedSum,waste,pEff:pP.supplyEff};
   }
-  return best;
+  return {best,minN};
 }
 // 非 PD：并发默认取「集群可持续上限」（实例数 × 每实例可持续流）
 function bestSingleCap(){
@@ -652,7 +656,7 @@ function calc(){
   if(pd && (!pdP||!pdD)){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
     let why;
-    if(nP<=0||nD<=0) why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入 P / D 节点数";
+    if(nP<=0||nD<=0) why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入 P / D 节点数"+(pdRec&&pdRec.minN?"；按当前节点配置，两池最少需要 "+pdRec.minN+" 节点（P+D）":"");
     else if(!pdP) why="P 池 "+nP+" 节点无法形成可部署实例 —— "+whyNoInst(m,g,hbm,Weff,nP).replace(/当前每节点/g,"每节点").replace(/→ 另一条路.*$/,"");
     else if(!pdD) why="D 池 "+nD+" 节点无法形成可部署实例（decode 还要常驻在途 KV，比只放权重更吃显存）—— "+whyNoInst(m,g,hbm,Weff,nD).replace(/→ 另一条路.*$/,"");
     else why="P 池或 D 池供给为 0";
@@ -685,7 +689,7 @@ function calc(){
     $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
-    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s（理想 "+pdP.lPraw.toFixed(2)+"） ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+(pdP.nodes>pdP.inst*pdP.gp.nodes?"，池内闲置 "+(pdP.nodes-pdP.inst*pdP.gp.nodes)+" 节点":"")+"；TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s（理想 "+pdP.lPraw.toFixed(2)+"） ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
     if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
     hs=hs.replace(/ ｜ $/,"");
     if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
@@ -870,7 +874,7 @@ function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」
 function autoDemand(force){
   if($("pd").checked){
     if(force){                                   // 初始化 / 换模型 / 切 PD：重解并发 + 配比
-      const b=bestUtilSplit();
+      const r=bestUtilSplit(), b=r.best;
       if(b){ $("inflight").value=b.C; $("pnodes").value=b.nP; $("dnodes").value=b.nD; pdUserEdited=false; return true; }
       return false;
     }
@@ -880,7 +884,7 @@ function autoDemand(force){
       if(C){ $("inflight").value=C; return true; }
       return false;
     }
-    const b=bestUtilSplit();
+    const r=bestUtilSplit(), b=r.best;
     if(b){ $("inflight").value=b.C; $("pnodes").value=b.nP; $("dnodes").value=b.nD; return true; }
     return false;
   }
