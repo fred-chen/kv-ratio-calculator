@@ -571,6 +571,8 @@ function calc(){
       ? "需求参数：需求 "+infl+" 已超本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐"
       : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）";
     $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+Math.min(infl,pdD.capAll)+"）";
+    {const e2e=lam*Tsvc, pre=Math.max(0,e2e-pdD.capAll);
+     $("d_svc").innerHTML = Tsvc.toFixed(2)+" s（同口径校验：到达率 λ "+lam.toFixed(2)+" req/s × 服务时长 = <b>"+e2e.toFixed(0)+" 条端到端在途</b> = decode 段 "+pdD.capAll+" + prefill 段 "+Math.round(pre)+"）";}
     $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
