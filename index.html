@@ -360,10 +360,11 @@ function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12
 // 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
 function ppOK(g0){ return g0.pp<=8 ? 1 : 0; }      // PP>8 深度流水：不现实，必须优先避开
 function tpInNode(g0,g){ return g0.tp<=g ? 1 : 0; } // TP 跨机只是弱偏好（真实部署常见 2 节点 TP）
-function supplyAt(m,g,pf,fl,b,nodes,legal,ttftMs){    // P 池：prefill 供给 req/s
-  const cand=[];
+function supplyAt(m,g,hbm,pf,fl,b,nodes,legal,ttftMs,W){    // P 池：prefill 供给 req/s
+  const budNode=g*hbm*UTIL, cand=[];
   for(const it of legal){ if(it.s>b) break;
-    const s=it.s, k=Math.floor(b/s), used=k*s;
+    const s=it.s; if(W > s*budNode) continue;            // 每个实例必须装得下一份权重，否则不可部署
+    const k=Math.floor(b/s), used=k*s;
     cand.push({s,k,used,g:it.g0,supply:used*g*pf*1e15*MFU/fl,Tpf:fl/(s*g*pf*1e15*MFU)});
   }
   if(!cand.length) return null;
@@ -409,13 +410,17 @@ function pdBestSplit(){
   let best=null, minD=0;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
-    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB), pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs);
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB), pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
     if(!dP||!pP) continue;
     if(dP.streams>0 && !minD) minD=nD;
     if(dP.streams<=0||pP.supply<=0) continue;
     const l=Math.min(dP.eff*tps/nout, pP.supplyEff);      // 形状代价后可达 λ
-    if(!best||l>best.l+1e-12||(Math.abs(l-best.l)<=1e-12&&nD<best.nD))
-      best={nP,nD,l,used:nP+nD,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
+    const usedSum=pP.used+dP.used;
+    if(!best){ best={nP,nD,l,used:nP+nD,usedSum,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s}; continue; }
+    const tie=Math.abs(l-best.l)<=1e-12;
+    if(l>best.l+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&nD<best.nD))
+      best={nP,nD,l,used:nP+nD,usedSum,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
   }
   if(!best||best.l<=1e-9) return {best:null,minD};
   return {best,minD};
@@ -433,13 +438,16 @@ function bestUtilSplit(){
   let best=null;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
-    const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) continue;
+    const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W); if(!pP||pP.supply<=0) continue;
     const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条       // 打满 P 所需并发（物理口径）
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
     const C=Math.max(1,Math.min(Creq, dP.streams, Math.floor(pP.supplyEff*nout/tps))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
-    const gap=Math.abs(Creq-dP.streams);
-    if(!best||lam>best.lam+1e-12||(Math.abs(lam-best.lam)<=1e-12&&gap<best.gap))
-      best={nP,nD,C,lam,gap};
+    const usedSum=pP.used+dP.used, gap=Math.abs(Creq-dP.streams);
+    if(!best){ best={nP,nD,C,lam,gap,usedSum,pEff:pP.supplyEff}; continue; }
+    const tie=Math.abs(lam-best.lam)<=1e-12;
+    if(lam>best.lam+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&gap<best.gap))
+      best={nP,nD,C,lam,gap,usedSum,pEff:pP.supplyEff};
   }
   return best;
 }
@@ -533,7 +541,7 @@ function calc(){
   if(pd){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
     const lg = legalList(m,g,Math.max(nP,nD));
-    const pPl = nP>0 ? supplyAt(m,g,pf,fl,nP,nodes,lg,Math.max(1,+$("ttft").value||500)) : null;
+    const pPl = nP>0 ? supplyAt(m,g,hbm,pf,fl,nP,nodes,lg,Math.max(1,+$("ttft").value||500),Weff) : null;
     const dPl = nD>0 ? dAt(m,g,hbm,pf,tps,S_GB,Weff,nD,infl,lg,bwH,A_GB) : null;
     if(pPl&&dPl){
       const TpfP = fl/(pPl.s*g*pf*1e15*MFU);
@@ -728,7 +736,7 @@ function calc(){
     let rbCap=null;   // 推荐配比自身的算力上限（不是当前配比的）
     if(rb.best){
       const lgR=legalList(m,g,Math.max(rb.best.nP,rb.best.nD));
-      const pR=supplyAt(m,g,pf,fl,rb.best.nP,nodes,lgR,Math.max(1,+$("ttft").value||500));
+      const pR=supplyAt(m,g,hbm,pf,fl,rb.best.nP,nodes,lgR,Math.max(1,+$("ttft").value||500),Weff);
       const dR=dAt(m,g,hbm,pf,tps,S_GB,Weff,rb.best.nD,infl,lgR,bwH,A_GB);
       if(pR&&dR) rbCap=Math.min(dR.k*Math.floor(dR.capS/dR.fac), dR.k*Math.max(0,dR.memMax), Math.floor(pR.supplyEff*nout/tps));
     }
@@ -831,7 +839,7 @@ function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,Math.max(nP,nD));
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const ttftMs=Math.max(1,+$("ttft").value||500);
-  const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) return null;
+  const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W); if(!pP||pP.supply<=0) return null;
   const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条
   const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP) return null;
   return Math.max(1,Math.round(Math.min(Creq,dP.streams)));
