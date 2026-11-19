@@ -208,7 +208,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
-    <b>并行形状代价（v1.9.14，按 NVLink/NVL72 带宽标定，系数固定不可调）</b>：不同形状的<b>理论</b> prefill 供给只取决于用满多少节点，差别在通信，按带宽比折算成「形状代价」乘在理想 prefill 时长上，作为形状排序键并用于 TTFT 判断（只影响选形状，不改 λ / 服务时长公式）：
+    <b>并行形状代价（v1.9.15，按 NVLink/NVL72 带宽标定，系数固定不可调）</b>：不同形状的<b>理论</b> prefill 供给只取决于用满多少节点，差别在通信，按带宽比折算成「形状代价」乘在理想 prefill 时长上，作为形状排序键并用于 TTFT 判断；<b>该代价已进入吞吐与配比</b>：P 池有效供给 = 理想 ÷ 代价因子、D 池有效流 = 物理流 ÷ 代价因子，系统 λ 与 P/D 推荐都按有效值比较（默认 24/8：λ 5.00 → 2.96 req/s、在途上限 32 → 19 条）：
     ① <b>TP 代价按等效带宽算</b>：ring all-reduce 上跨机链路占比 <b>f = 2×(跨机台数)/TP</b>（每过一台机 2 条链路）；域内跨 tray 仍走 NVLink（按 0.9 折），跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡）。等效倍数 = <b>1 ÷ ((1−f) + f×(100/900))</b>；
     举例 TP16（跨 2 台机）：f=12.5% → 1÷(0.875+0.0139) ≈ <b>1.13</b>；TP32（跨 4 台机）：f=18.8% → ≈ <b>1.20</b>；
     ② <b>PP 流水气泡</b>：微批 M≈8 时流水效率 = M/(M+PP−1)，折算 <b>每级 ×(1+1/8)</b>（PP4 → 1.5、PP8 → 2.0）；
@@ -357,7 +357,7 @@ function supplyAt(m,g,pf,fl,b,nodes,legal,ttftMs){    // P 池：prefill 供给 
     const tpfEff=o.Tpf*fac;                       // 形状修正后的有效 prefill 时长
     const ttftOK=(!ttftMs||tpfEff*1000<=ttftMs)?1:0;
     const rank=[o.used>=maxUsed*0.95?1:0, ppOK(o.g), ttftOK, -tpfEff, -o.Tpf, tpInNode(o.g,g)];
-    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o,{fac,tpfEff});
+    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o,{fac,tpfEff,supplyEff:o.supply/fac});
   }
   return best;
 }
@@ -371,7 +371,8 @@ function singlePlan(m,g,hbm,pf,fl,tps,nout,S,W,nodes,C,bwH,A_GB){
     if(W + g0.rep*perInst*S*KVH > s*budNode) continue;         // 每实例显存须容得下分摊并发
     const Tpf=fl/(s*g*pf*1e15*MFU), Tsvc=Tpf+nout/tps;
     const capS=decStreamsCap(s*g, A_GB, g0.rep, S, tps, bwH);      // 每实例可承载流（HBM 带宽口径）
-    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)));
+    const fac=shapeFactor(g0.tp, g0.pp, g);
+    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)/fac));   // 形状代价折掉有效流
     return {s,k,used:k*s,perInst,g:g0,Tpf,Tsvc,inflMax,capS,streams:Math.min(C,k*inflMax)};
   }
   return null;
@@ -394,7 +395,7 @@ function pdBestSplit(){
     if(!dP||!pP) continue;
     if(dP.streams>0 && !minD) minD=nD;
     if(dP.streams<=0||pP.supply<=0) continue;
-    const l=Math.min(dP.streams*tps/nout, pP.supply);
+    const l=Math.min(dP.eff*tps/nout, pP.supplyEff);      // 形状代价后可达 λ
     if(!best||l>best.l+1e-12||(Math.abs(l-best.l)<=1e-12&&nD<best.nD))
       best={nP,nD,l,used:nP+nD,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
   }
@@ -415,9 +416,9 @@ function bestUtilSplit(){
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
     const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) continue;
-    const Creq=Math.max(1,Math.round(pP.supply*nout/tps));      // 打满 P 所需并发
-    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.streams<=0) continue;
-    const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout, pP.supply);
+    const Creq=Math.max(1,Math.round(pP.supply*nout/tps));       // 打满 P 所需并发（物理口径）
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
+    const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
     const gap=Math.abs(Creq-dP.streams);
     if(!best||lam>best.lam+1e-12||(Math.abs(lam-best.lam)<=1e-12&&gap<best.gap))
       best={nP,nD,C,lam,gap};
@@ -507,12 +508,13 @@ function calc(){
     if(pPl&&dPl){
       const TpfP = fl/(pPl.s*g*pf*1e15*MFU);
       Tpf = TpfP; Tsvc = TpfP + nout/tps;
-      pdP = {nodes:nP, inst:pPl.k, gp:{nodes:pPl.s, grid:[pPl.g.tp,pPl.g.pp], rep:pPl.g.rep}, lP:pPl.supply, fac:pPl.fac, tpfEff:pPl.tpfEff};
+      pdP = {nodes:nP, inst:pPl.k, gp:{nodes:pPl.s, grid:[pPl.g.tp,pPl.g.pp], rep:pPl.g.rep}, lP:pPl.supplyEff, fac:pPl.fac, tpfEff:pPl.tpfEff, lPraw:pPl.supply};
       pdD = {nodes:nD, inst:dPl.k, gd:{nodes:dPl.s, grid:[dPl.g.tp,dPl.g.pp], rep:dPl.g.rep},
-             capS:dPl.capS, memMax:dPl.memMax,
-             streams:dPl.streams, perInst:dPl.perInst,
-             inflD:Math.min(dPl.perInst, dPl.capS, Math.max(0,dPl.memMax)), lD:dPl.streams*tps/nout};
-      lam = Math.min(pdD.lD, pPl.supply);
+             capS:dPl.capS, memMax:dPl.memMax, fac:dPl.fac,
+             streams:dPl.streams, streamsEff:dPl.eff, perInst:dPl.perInst,
+             inflD:Math.min(dPl.perInst, Math.floor(dPl.capS/dPl.fac), Math.max(0,dPl.memMax)), lD:dPl.eff*tps/nout};
+      pdP.lPraw = pPl.supply; pdP.fac = pPl.fac;
+      lam = Math.min(pdD.lD, pPl.supplyEff);
       // 瓶颈归属：P 供给不足 → "P"；D 算力不足（没吃满需求并发）→ "D"；D 已吃满需求、λ 由需求封顶 → "需求"
       pdP.bott = (pPl.supply <= pdD.lD+1e-9) ? "P" : (dPl.streams < infl-1e-9 ? "D" : "需求");
     }
@@ -622,7 +624,7 @@ function calc(){
     $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
-    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s（理想 "+pdP.lPraw.toFixed(2)+"） ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
     if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
     hs=hs.replace(/ ｜ $/,"");
     if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
@@ -696,7 +698,7 @@ function calc(){
       const lgR=legalList(m,g,Math.max(rb.best.nP,rb.best.nD));
       const pR=supplyAt(m,g,pf,fl,rb.best.nP,nodes,lgR,Math.max(1,+$("ttft").value||500));
       const dR=dAt(m,g,hbm,pf,tps,S_GB,Weff,rb.best.nD,infl,lgR,bwH,A_GB);
-      if(pR&&dR) rbCap=Math.min(dR.k*dR.capS, dR.k*Math.max(0,dR.memMax), Math.floor(pR.supply*nout/tps));
+      if(pR&&dR) rbCap=Math.min(dR.k*Math.floor(dR.capS/dR.fac), dR.k*Math.max(0,dR.memMax), Math.floor(pR.supplyEff*nout/tps));
     }
     chk.push(rb.best ? {c:"ok",t:"按算力均衡的推荐配比：P "+rb.best.nP+" / D "+rb.best.nD+"（系统 λ 可达 "+rb.best.l.toFixed(2)+" req/s；当前 "+lam.toFixed(2)+" req/s"+(rbCap?"；该配比算力上限 "+rbCap+" 条在途":"")+"）"}
                      : {c:"bad",t:"节点不足以同时容纳 P、D 两池的最小合法实例（P 需 "+(pdP?pdP.gp.nodes:"–")+"、D 需 "+(pdD?pdD.gd.nodes:"–")+" 节点）"});
