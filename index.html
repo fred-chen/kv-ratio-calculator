@@ -522,8 +522,8 @@ function calc(){
   const lifeSpan = (isFinite(lifeY)&&lifeY<riskY-1e-9) ? '<span class="risk">≈'+lifeTxt+'</span>' : "≈"+lifeTxt;
   $("r_capu").innerHTML = !ok ? notWhy+"：容量与带宽均按 0 计" : (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b> · 实际可保留 KV <b>"+thEff.toFixed(2)+" h</b>":"保留窗口 "+th+"h 全量保留 · 不受忙闲影响")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
   const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
-  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s = 到达率 "+lam.toLocaleString("zh",{maximumFractionDigits:2})+" req/s × 单请求 "+humanGB(S_GB)+"（峰值口径；≈"+(wr*8/1000).toFixed(2)+" Tbit/s；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s）";
-  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*8/1000).toFixed(2)+" Tbit/s）· 峰值口径，与写并发";
+  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s = 到达率 "+lam.toLocaleString("zh",{maximumFractionDigits:2})+" req/s × 单请求 "+humanGB(S_GB)+"（峰值口径；≈"+(wr*3.6).toFixed(0)+" TB/h；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s）";
+  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*3.6).toFixed(0)+" TB/h）· 峰值口径，与写并发";
   $("r_bwsum").textContent = fmtBW(wr+rd)+" GB/s = 写 "+fmtBW(wr)+" + 读 "+fmtBW(rd)+"（读写通道物理独立时只需 max "+fmtBW(Math.max(wr,rd))+"）";
   $("r_s").textContent = humanGB(S_GB);
   if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
@@ -533,7 +533,7 @@ function calc(){
     if(parts.length){ $("row_state").style.display=""; $("d_state").textContent=parts.join(" + "); }
     else $("row_state").style.display="none"; }
   $("r_lam").textContent = lam.toLocaleString("zh",{maximumFractionDigits:1})+" req/s";
-  $("d_kvrate").innerHTML = ok ? (wr.toFixed(1)+" GB/s（= "+lam.toFixed(2)+" req/s × "+humanGB(S_GB)+"；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s = "+tps+" tok/s × "+(sTokB/1e3).toFixed(1)+" KB/token；≈"+(wr*8/1000).toFixed(2)+" Tbit/s）") : "–";
+  $("d_kvrate").innerHTML = ok ? (wr.toFixed(1)+" GB/s（= "+lam.toFixed(2)+" req/s × "+humanGB(S_GB)+"；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s = "+tps+" tok/s × "+(sTokB/1e3).toFixed(1)+" KB/token；≈"+(wr*3.6).toFixed(0)+" TB/h）") : "–";
   $("d_w").textContent = grid ? (humanGB(inst*Weff)+"（"+inst+" 实例 × 单份 "+humanGB(Weff)+"）") : humanGB(Weff)+"（单份，未部署）";
   $("d_bud").textContent = humanGB(Math.max(budInst,0));
   const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
