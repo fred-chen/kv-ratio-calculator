@@ -427,7 +427,7 @@ function bestUtilSplit(){
     const pP=supplyAt(m,g,pf,fl,nP,nodes,legal,ttftMs); if(!pP||pP.supply<=0) continue;
     const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条       // 打满 P 所需并发（物理口径）
     const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
-    const C=Math.max(1,Math.round(Math.min(Creq,dP.streams))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
+    const C=Math.max(1,Math.min(Creq, dP.streams, Math.floor(pP.supplyEff*nout/tps))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
     const gap=Math.abs(Creq-dP.streams);
     if(!best||lam>best.lam+1e-12||(Math.abs(lam-best.lam)<=1e-12&&gap<best.gap))
       best={nP,nD,C,lam,gap};
