@@ -380,6 +380,20 @@ function supplyAt(m,g,hbm,pf,fl,b,nodes,legal,ttftMs,W){    // P 池：prefill �
   }
   return best;
 }
+// 为什么「0 个可承载实例」：区分「没有合法并行网格」与「最小合法实例装不下权重」
+function whyNoInst(m,g,hbm,W,nodes){
+  const budNode=g*hbm*UTIL, lg=legalList(m,g,nodes);
+  const bud=sz=>sz*budNode;
+  if(!lg.length) return "当前「单节点 GPU 数」下不存在合法并行网格（TP 需整除头数 "+m.nq+" 与维度 "+m.dm+"，PP 需整除 "+m.L+" 层）——建议把每节点 GPU 数改为 8 再试";
+  const sizes=[...new Set(lg.map(x=>x.s))].sort((a,b)=>a-b);
+  const fit=sizes.find(sz=>W<=bud(sz));
+  if(fit) return "存在 "+fit+" 节点合法实例（"+humanGB(bud(fit))+"），但装不下权重 "+humanGB(W)+" + 在途 KV 的复制 → 需增加节点或降低在途并发";
+  const maxS=sizes[sizes.length-1];
+  let nextS=0; for(let sz=nodes+1;sz<=nodes+64;sz++){ if(legalGrids(m,g,sz).length){ nextS=sz; break; } }
+  return "当前每节点 "+g+" 卡时，合法实例尺寸只有 "+sizes.join(" / ")+" 节点；其中最大 "+maxS+" 节点可用 "+humanGB(bud(maxS))+" < 权重 "+humanGB(W)+
+         (nextS? "，再下一档合法尺寸是 "+nextS+" 节点（把节点数加到 "+nextS+" 即可）" : "")+
+         " → 另一条路：把「单节点 GPU 数」改成 8（8 节点=64 卡实例可用 8.29 TB，能装下该权重）";
+}
 // 非 PD 单池：既做 prefill 又做 decode；取「能容纳该并发分摊的最小实例粒度」（多实例、小爆炸半径）
 function singlePlan(m,g,hbm,pf,fl,tps,nout,S,W,nodes,C,bwH,A_GB){
   const budNode=g*hbm*UTIL;
@@ -596,7 +610,7 @@ function calc(){
   const thEff = (ok && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长（PD 也适用）
   const notWhy = !pd ? ((grid&&inst===0)
         ? "节点数 "+nodes+" 不足以容纳 1 个满足需求并发 "+infl+" 的实例（每实例需 "+nInst+" 节点，含 KV ×"+rep+" 复制）"
-        : "节点数不足以容纳权重与在途 KV 的复制")
+        : whyNoInst(m,g,hbm,m.W*bw,nodes))
     : (!pdP||!pdD) ? ((pdRec&&pdRec.minD&&nodes<pdRec.minD+1)
         ? "总节点 "+nodes+" 不足以同时容纳 D 池与 P 池：D 在目标 tps 下服务需求并发 "+infl+" 至少需 "+pdRec.minD+" 节点（权重+"+infl+" 条并发的 KV），另需 ≥1 节点给 P"
         : "P 或 D 节点数为 0，或填写的节点数不足以形成 1 个实例")
