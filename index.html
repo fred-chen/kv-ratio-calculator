@@ -170,7 +170,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <tr><td>单请求服务时长（prefill + decode）</td><td id="d_svc">–</td></tr>
         <tr><td>prefill 算力占用（按可持续流量）</td><td id="d_pfutil">–</td></tr>
         <tr><td>decode 吞吐占用（÷ 参考聚合 dec_agg）</td><td id="d_decutil">–</td></tr>
-        <tr><td>算力上限（可持续在流）/ 实例</td><td id="d_inflmax">–</td></tr>
+        <tr><td>算力上限（可持续在途）/ <b>集群</b></td><td id="d_inflmax">–</td></tr>
         <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
         <tr><td><b>等效 KV 保留窗口</b>（选型容量 ÷ 峰值写入速率）</td><td id="d_theff">–</td></tr>
         <tr><td>忙闲负荷系数（<b>仅作用于日均写入与寿命，不影响容量</b>）</td><td id="d_cf">–</td></tr>
@@ -544,7 +544,7 @@ function calc(){
   $("inflhint").innerHTML = !grid ? "需求参数：由业务峰值并发给定；当前配置无法部署，上限未知"
     : ((inst*inflMax)>=infl ? "需求参数：需求 "+infl+" ≤ <b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）"
                             : "需求参数：需求 "+infl+" 已超<b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）—— 超出部分不产生吞吐，容量按 "+(inst*inflMax)+" 计");
-  $("d_inflmax").textContent = grid ? ("每实例 "+inflMax+"（集群上限 "+(inst*inflMax)+"；需求 "+infl+" → 有效 "+Ceff+"）") : dash;
+  $("d_inflmax").textContent = grid ? ((inst*inflMax)+" 条（每实例 "+inflMax+" × "+inst+" 实例；受限项："+((Tsvc/Tpf)<=(decAgg/tps)?"prefill 算力":"decode 聚合")+"；需求 "+infl+" → 有效 "+Ceff+"）") : dash;
   $("d_work").textContent = grid ? (humanGB(capWork)+(Ceff<infl?"（按有效并发 "+Ceff+"/"+infl+"）":"")) : dash;
   if(pd&&pdP&&pdD){
     // —— PD 池覆写首屏与明细 ——
@@ -560,11 +560,14 @@ function calc(){
     $("d_bud").textContent=humanGB(Math.max(budD,0))+"（D 实例 KV 预算）";
     $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
     $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（λ "+lam.toFixed(2)+" req/s × "+nout+" tok ÷ D 池聚合 "+pdD.decTot.toLocaleString()+" tok/s）";
-    const dCeil=Math.min(Math.floor(pdD.decI/tps), pdD.memMax);   // D 池并发上限（decode 流 / 显存可驻）
-    $("inflhint").innerHTML = (infl>dCeil)
-      ? "需求参数（D 实例）：需求 "+infl+" 已超<b>并发上限 "+dCeil+"</b>（decode 算力上限 "+Math.floor(pdD.decI/tps)+" / 显存可驻 "+pdD.memMax+"）—— 超出部分不产生吞吐"
-      : "需求参数（D 实例）：需求 "+infl+" ≤ <b>并发上限 "+dCeil+"</b>（decode 算力上限 "+Math.floor(pdD.decI/tps)+" / 显存可驻 "+pdD.memMax+"）；系统吞吐另受 P 池 "+pdP.lP.toFixed(2)+" req/s 约束";
-    $("d_inflmax").textContent=pdD.inflD+" / D 实例 = min(需求 "+infl+", decode 算力上限 "+Math.floor(pdD.decI/tps)+", 显存可驻 "+pdD.memMax+")";
+    // 当前配比下「集群最多能挂多少在途请求」：P 池能喂多少 + D 池 decode/显存各能挂多少，取 min
+    const dDec=pdD.inst*Math.floor(pdD.decI/tps), dMem=pdD.inst*Math.max(0,pdD.memMax), pCap=Math.floor(pdP.lP*nout/tps);
+    pdD.capAll=Math.min(dDec,dMem,pCap);
+    pdD.capBnd=(pdD.capAll===pCap)?"P 池 prefill":((pdD.capAll===dDec)?"D 池 decode 算力":"D 池显存");
+    $("inflhint").innerHTML = (infl>pdD.capAll)
+      ? "需求参数：需求 "+infl+" 已超本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐"
+      : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）";
+    $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+Math.min(infl,pdD.capAll)+"）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
     let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池":pdP.bott==="D"?"D 池":"两池均衡");
@@ -636,7 +639,14 @@ function calc(){
     if(sPD>nodes) chk.push({c:"bad",t:"P+D 节点数 "+sPD+" 超过总节点 "+nodes+"：超出 "+(sPD-nodes)+" 节点无法部署，请调整配比"});
     else if(sPD<nodes) chk.push({c:"warn",t:"P+D 节点数 "+sPD+" 少于总节点 "+nodes+"：有 "+(nodes-sPD)+" 节点闲置，可点「按算力均衡推荐」重新分配"});
     const rb=pdRec;
-    chk.push(rb.best ? {c:"ok",t:"按算力均衡的推荐配比：P "+rb.best.nP+" / D "+rb.best.nD+"（系统 λ 可达 "+rb.best.l.toFixed(2)+" req/s；当前 "+lam.toFixed(2)+" req/s）"}
+    let rbCap=null;   // 推荐配比自身的算力上限（不是当前配比的）
+    if(rb.best){
+      const lgR=legalList(m,g,Math.max(rb.best.nP,rb.best.nD));
+      const pR=supplyAt(m,g,pf,fl,rb.best.nP,nodes,lgR,Math.max(1,+$("ttft").value||500));
+      const dR=dAt(m,g,hbm,pf,tps,S_GB,Weff,rb.best.nD,infl,lgR);
+      if(pR&&dR) rbCap=Math.min(dR.k*Math.floor(dR.decI/tps), dR.k*Math.max(0,dR.memMax), Math.floor(pR.supply*nout/tps));
+    }
+    chk.push(rb.best ? {c:"ok",t:"按算力均衡的推荐配比：P "+rb.best.nP+" / D "+rb.best.nD+"（系统 λ 可达 "+rb.best.l.toFixed(2)+" req/s；当前 "+lam.toFixed(2)+" req/s"+(rbCap?"；该配比算力上限 "+rbCap+" 条在途":"")+"）"}
                      : {c:"bad",t:"节点不足以同时容纳 P、D 两池的最小合法实例（P 需 "+(pdP?pdP.gp.nodes:"–")+"、D 需 "+(pdD?pdD.gd.nodes:"–")+" 节点）"});
   }else if(pd){
     chk.push({c:"bad",t:"PD 分离已启用但 P/D 节点数为 0 或池无法部署：请在「PD 池节点配比」中填写 P、D 节点数（可点「按算力均衡推荐」自动分配）"});
@@ -657,6 +667,8 @@ function calc(){
       : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
     else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
   }
+  if(pd&&pdD&&pdD.capAll&&infl>pdD.capAll)
+    chk.push({c:"warn",t:"<b>需求并发超本配比算力上限</b>：需求 "+infl+" > 上限 "+pdD.capAll+" 条（受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐，容量/带宽按上限计；要承载需加节点或调整 P/D"});
   const chkBad=chk.filter(x=>x.c!=="ok"), chkOk=chk.filter(x=>x.c==="ok");
   $("r_chk").innerHTML = (chkBad.length
       ? chkBad.map(x=>`<li class="${x.c}">${x.t}</li>`).join("")
