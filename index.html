@@ -493,7 +493,6 @@ function calc(){
         // 寿命按「最终选型容量」核算：若已按期待寿命扩容，则寿命随之达标（闭环）
         lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
-  const thEff = (grid && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长
   const capWork = (pd&&pdD) ? pdD.streams*S_GB*RED : Ceff*S_GB*RED;   // 在途工作集×1.2（按有效并发）
   const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
 
@@ -506,6 +505,7 @@ function calc(){
   else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
   const pdSum = (pd&&pdP&&pdD) ? pdP.nodes+pdD.nodes : 0;
   const ok = pd ? !!(pdP&&pdD&&pdSum<=nodes&&lam>0) : !!(grid&&inst>0);   // 可部署判据
+  const thEff = (ok && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长（PD 也适用）
   const notWhy = !pd ? ((grid&&inst===0)
         ? "节点数 "+nodes+" 不足以容纳 1 个满足需求并发 "+infl+" 的实例（每实例需 "+nInst+" 节点，含 KV ×"+rep+" 复制）"
         : "节点数不足以容纳权重与在途 KV 的复制")
@@ -570,7 +570,7 @@ function calc(){
     $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D decode "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+Math.min(infl,pdD.capAll)+"）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
-    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池":pdP.bott==="D"?"D 池":"两池均衡");
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s，瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（decode/显存不足）":"需求并发封顶（两池仍有余量）");
     if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
     hs=hs.replace(/ ｜ $/,"");
     if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
