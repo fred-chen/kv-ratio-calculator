@@ -208,6 +208,11 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：节点内 TP 优先、TP ≤ max(16, 每节点GPU数)、跨节点 TP 与 PP>8 会给出提示；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
+    <b>并行形状代价（v1.9.14，按 NVLink/NVL72 带宽标定，系数固定不可调）</b>：不同形状的<b>理论</b> prefill 供给只取决于用满多少节点，差别在通信，按带宽比折算成「形状代价」乘在理想 prefill 时长上，作为形状排序键并用于 TTFT 判断（只影响选形状，不改 λ / 服务时长公式）：
+    ① <b>TP 代价按等效带宽算</b>：ring all-reduce 上跨机链路占比 <b>f = 2×(跨机台数)/TP</b>（每过一台机 2 条链路）；域内跨 tray 仍走 NVLink（按 0.9 折），跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡）。等效倍数 = <b>1 ÷ ((1−f) + f×(100/900))</b>；
+    举例 TP16（跨 2 台机）：f=12.5% → 1÷(0.875+0.0139) ≈ <b>1.13</b>；TP32（跨 4 台机）：f=18.8% → ≈ <b>1.20</b>；
+    ② <b>PP 流水气泡</b>：微批 M≈8 时流水效率 = M/(M+PP−1)，折算 <b>每级 ×(1+1/8)</b>（PP4 → 1.5、PP8 → 2.0）；
+    ③ 域大小按 GPU 型号判定：B100/B200/B300 → 72 卡（NVL72 整机柜，域内跨 tray 仍是 NVLink），A100/A800/H100/H200/H20/自定义 → 8 卡（单机 NVLink，跨机即 IB）。<br>
     <b>decode 容量改为 HBM 带宽口径（v1.9.13）</b>：decode 是<b>访存受限</b>——每生成 1 个 token 都要把「激活权重」读一遍（MoE 只读激活专家，稠密模型即全部权重），再按在驻并发各读一遍其 KV。故每实例可承载流数
     <b>≈ (实例卡数 × 单卡 HBM 带宽 ÷ 目标 tps − 激活权重 GB) ÷ (每流在驻 KV GB)</b>，其中每流在驻 KV = 单请求 KV × TP 复制系数 × 50% 常驻。输入「单卡 HBM 带宽」缺省 3.35 TB/s（H100），H200 4.8、B200 8.0、A100 2.0；选 GPU 型号会自动带出。
     由此可得三条工程结论：<b>目标 tps 越高、上下文越长、KV 精度越高，可承载流越少</b>；<b>权重越大，每步固定开销越大，decode 越难摊薄</b>；<b>要提并发只能加卡/换高带宽卡/降 tps</b>。旧的「350 tok/s/卡」锚值已停用（原为 H100 级 32 卡实例聚合 11,200 tok/s 的外推值，属乐观估计）。<br>
@@ -238,6 +243,14 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 const MODELS = [{"n": "DeepSeek-V4-Flash", "id": "deepseek-ai/DeepSeek-V4-Flash", "cls": "mla", "L": 43, "Lf": 43, "Ll": 0, "nq": 64, "nkv": 1, "et": 2768, "es": 0, "idx": 672, "dkv": 576, "W": 290.9, "P": 17.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 3014656, "wsB": 1, "dm": 4096, "td": 64.4, "ctx": 1048576, "note": "官方交错池化：21 层 ratio=4 + 20 层 ratio=128 → 5.406 条×512/token；indexer 仅 r4 层 21 份×128；46 层滑窗 128×512（含 3 MTP，FP8）"}, {"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 1280, "es": 0, "idx": 320, "dkv": 576, "W": 763.2, "P": 20.8, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 2818048, "wsB": 1, "dm": 5120, "td": 32.0, "ctx": 1048576, "note": "官方共享池：KV 仅 4 源层按 1/2、1/2、1/2、1 池化 → 2.5 条×512/token；indexer 4 份×128 维共享；43 层滑窗 128×512（含 3 draft，FP8）"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "fp8", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "dkv": 1024, "W": 298.8, "P": 21, "Pe": false, "psrc": "模型卡 295B/A21B", "wdt": "bf16", "kvh": 8, "esB": 4, "ws": 0, "wsB": 1, "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 780.0, "P": 49, "Pe": false, "psrc": "模型卡 770B/A49B", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2779.9, "P": 104, "Pe": false, "psrc": "模型卡 Activated 104B", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "KDA 混合：24 MLA 全注意力(576/token)+69 KDA 线性（每层循环态 96×128×128+conv，共 116.2M 元素/序列，FP32）"}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2780.1, "P": 104, "Pe": false, "psrc": "模型卡（同 K3）", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "同 Kimi-K3（KDA 混合 24+69）"}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 11520, "es": 0, "idx": 0, "dkv": 768, "W": 310.8, "P": 16.0, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 12779520, "wsB": 0, "dm": 4096, "td": 240.0, "ctx": 1048576, "note": "混合滑窗 GQA：9 全层 + 39 窗口层(128×8头，每序列快照)"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 25600, "es": 0, "idx": 0, "dkv": 1536, "W": 1024.2, "P": 42.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 8, "esB": 4, "ws": 19660800, "wsB": 0, "dm": 6144, "td": 365.7, "ctx": 1048576, "note": "混合滑窗 GQA：10 全层 + 60 窗口层(128×8头，每序列快照)"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7296, "dkv": 512, "W": 427.0, "P": 23, "Pe": false, "psrc": "模型卡 ~428B/A23B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7680, "dkv": 512, "W": 220.5, "P": 12, "Pe": true, "psrc": "按 M3 比例估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "dkv": 1024, "W": 2446.2, "P": 95, "Pe": false, "psrc": "模型卡 A95B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性"}, {"n": "Qwen3.8-27B", "id": "Qwen/Qwen3.8-27B", "cls": "hybrid", "L": 64, "Lf": 16, "Ll": 48, "nq": 24, "nkv": 4, "et": 32768, "es": 38928384, "idx": 0, "dkv": 1024, "W": 27.8, "P": 27.3, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 5120, "td": 2048.0, "ctx": 262144, "note": "混合：16 全注意力 + 48 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 384, "dkv": 512, "W": 180.0, "P": 6, "Pe": false, "psrc": "模型卡 125B/A6B", "wdt": "bf16", "kvh": 2, "esB": 4, "ws": 0, "wsB": 1, "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}];
 
 const $ = id => document.getElementById(id);
+// —— 并行形状代价：按 NVLink 带宽标定（写死在固定假设里，界面不可调）——
+// NVLink5：每卡 900 GB/s/向（1.8 TB/s 双向）；NVL72 单域 72 卡、域内聚合 130 TB/s
+// 域内跨 tray 仍走 NVLink（带宽不变，只多 1 跳 ≈1–2 µs + 交换机拥塞）→ 每跨 1 台机 +3%
+// 跨出 NVLink 域改走 IB（800 Gb/s ≈ 100 GB/s/卡，相对 NVLink 慢 ≈9×）→ 每跨 1 台机 +60%（保守）
+// PP：微批 M≈8 时流水效率 = M/(M+PP−1) → 每加 1 级 ≈ 1/M ≈ +12%
+const NV_DOMAIN=72, NV_BW=900, IB_BW=100, NV_LINK_EFF=0.90, PP_PEN=1/8;
+// 哪个型号处在 NVL72 域：B100/B200/B300 是 NVLink5 整机柜；其余（A100/A800/H100/H200/H20/自定义）按单机 NVLink、跨机走 IB
+function nvDomain(){ const i=+$("gpu").value; return (i===7||i===8||i===9) ? NV_DOMAIN : 8; }
 const sel = $("model");
 MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n+(m.cls==="hybrid"?"（混合线性）":m.cls==="mla"?"（MLA）":"（GQA）");sel.appendChild(o);});
 sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
@@ -302,8 +315,9 @@ function dAt(m,g,hbm,pf,tps,S,W,b,C,legal,bwH,A_GB){   // D 池：可服务并�
     const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH);   // 每实例可承载流（带宽+激活权重）
     const memMax=Math.floor((used*budNode - k*W)/(it.g0.rep*Math.max(1e-9,S)*KVH));
     const streams=Math.max(0,Math.min(C, capS*k, memMax));
-    const rank=[streams, ppOK(it.g0), -s];               // 可服务流 > PP≤8 > 实例更小（副本更多）
-    if(!best||rankCmp(rank,best.rank)>0) best={s,k,used,perInst,g:it.g0,streams,capS,memMax,rank};
+    const fac=shapeFactor(it.g0.tp,it.g0.pp,g), eff=streams/fac;   // decode 逐 token 受气泡/跨机拖累
+    const rank=[eff, ppOK(it.g0), -s];                   // 形状修正后可服务流 > PP≤8 > 实例更小
+    if(!best||rankCmp(rank,best.rank)>0) best={s,k,used,perInst,g:it.g0,streams,capS,memMax,fac,eff,rank};
   }
   return best;
 }
@@ -315,6 +329,14 @@ function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH){
   const perStream = rep*S_GB*KVH;               // 每流每步要读的在驻 KV（含 TP 复制、50% 常驻）
   if(!(perStream>0) || room<=0) return 0;
   return Math.max(0, Math.floor(room/perStream));
+}
+// 形状代价：跨机 TP 的 all-reduce + PP 流水气泡，乘在「理想 prefill 时长」上，用于比较不同并行形状
+function shapeFactor(tp, pp, g){
+  const hops=Math.max(0, Math.ceil(tp/g)-1);              // 跨了几台机（机内 TP 记 0）
+  const f=Math.min(0.5, 2*hops/Math.max(2,tp));            // ring all-reduce 上「跨机链路」占比（每过一台机 2 条）
+  const r=(tp<=nvDomain()) ? NV_LINK_EFF : IB_BW/NV_BW;    // 域内跨 tray 走 NVLink（约 0.9）；跨域走 IB（100/900）
+  const tpFac=1/((1-f)+f*r);                               // 等效 all-reduce 带宽下降倍数
+  return tpFac*(1+PP_PEN*pp);                              // × PP 流水气泡（每级 1/8）
 }
 function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12) return a[i]-b[i]; } return 0; }
 // 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
@@ -331,9 +353,11 @@ function supplyAt(m,g,pf,fl,b,nodes,legal,ttftMs){    // P 池：prefill 供给 
   // 吞吐优先但留 5% 余量：同档内先满足 TTFT，再取 prefill 更快（实例更大）、PP≤8、机内 TP
   let best=null;
   for(const o of cand){
-    const ttftOK=(!ttftMs||o.Tpf*1000<=ttftMs)?1:0;
-    const rank=[o.used>=maxUsed*0.95?1:0, ppOK(o.g), ttftOK, -o.Tpf, tpInNode(o.g,g)];
-    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o);
+    const fac=shapeFactor(o.g.tp, o.g.pp, g);
+    const tpfEff=o.Tpf*fac;                       // 形状修正后的有效 prefill 时长
+    const ttftOK=(!ttftMs||tpfEff*1000<=ttftMs)?1:0;
+    const rank=[o.used>=maxUsed*0.95?1:0, ppOK(o.g), ttftOK, -tpfEff, -o.Tpf, tpInNode(o.g,g)];
+    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o,{fac,tpfEff});
   }
   return best;
 }
@@ -414,7 +438,8 @@ function bestSingleCap(){
     const s=it.s, k=Math.floor(nodes/s); if(k<1) continue;
     const Tpf=fl/(s*g*pf*1e15*MFU), Tsvc=Tpf+nout/tps;
     const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH);
-    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)));
+    const fac=shapeFactor(it.g0.tp, it.g0.pp, g);
+    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)/fac));   // 形状代价折掉一部分可持续流
     const C=k*inflMax;
     if(W + it.g0.rep*(C/k)*S*KVH > s*budNode) continue;
     const lam=C/Tsvc;
@@ -438,7 +463,8 @@ function calc(){
   const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
   const m=MODELS[+sel.value], pf=Math.max(0.05,num("pf",2)), hbm=Math.max(1,num("hbm",144)),
         g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
-        bw=+$("bw").value||1, bk=+$("bk").value||2, bwH=Math.max(0.1,num("hbmbw",3.35)), pd=$("pd").checked,
+        bw=+$("bw").value||1, bk=+$("bk").value||2, bwH=Math.max(0.1,num("hbmbw",3.35)),
+        pd=$("pd").checked,
         infl=Math.max(1,Math.round(num("inflight",40))), ctx=Math.max(1,Math.round(num("ctx",65536))),
         nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",80)),
         ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2)),
@@ -481,7 +507,7 @@ function calc(){
     if(pPl&&dPl){
       const TpfP = fl/(pPl.s*g*pf*1e15*MFU);
       Tpf = TpfP; Tsvc = TpfP + nout/tps;
-      pdP = {nodes:nP, inst:pPl.k, gp:{nodes:pPl.s, grid:[pPl.g.tp,pPl.g.pp], rep:pPl.g.rep}, lP:pPl.supply};
+      pdP = {nodes:nP, inst:pPl.k, gp:{nodes:pPl.s, grid:[pPl.g.tp,pPl.g.pp], rep:pPl.g.rep}, lP:pPl.supply, fac:pPl.fac, tpfEff:pPl.tpfEff};
       pdD = {nodes:nD, inst:dPl.k, gd:{nodes:dPl.s, grid:[dPl.g.tp,dPl.g.pp], rep:dPl.g.rep},
              capS:dPl.capS, memMax:dPl.memMax,
              streams:dPl.streams, perInst:dPl.perInst,
@@ -596,7 +622,7 @@ function calc(){
     $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
     $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
     const rec=pdRec, sum=pdP.nodes+pdD.nodes;
-    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
     if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
     hs=hs.replace(/ ｜ $/,"");
     if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
@@ -651,7 +677,7 @@ function calc(){
   if(bw===0.5 && pf>1.2) chk.push({c:"warn",t:"INT4 权重 + "+pf+" PF 疑似口径错档：weight-only INT4 以 BF16 算力执行，若此值来自 FP8 峰值请改约 "+(pf/2)+" PF，否则 prefill/decode 将乐观约 2×"});
   if(grid && !pd){
   chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
-                          : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms 超 TTFT 目标 "+ttft+" ms：增加每实例节点数或降上下文"});
+                          : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms（形状代价 ×"+(pdP&&pdP.fac?pdP.fac.toFixed(2):"?")+" → 有效 "+(((pdP&&pdP.tpfEff)||Tpf)*1000).toFixed(0)+" ms）超 TTFT 目标 "+ttft+" ms：增加每实例节点数、降 PP/TP 跨机或降上下文"});
   chk.push((inst*inflMax)>=infl
     ? {c:"ok",t:"prefill 算力充足：集群上限 "+(inst*inflMax)+" 并发 ≥ 需求 "+infl+"（"+inst+" 实例 × 上限 "+inflMax+"）"}
     : {c:"warn",t:"<b>需求超出算力上限</b>：需求 "+infl+" 并发 > 集群上限 "+(inst*inflMax)+"（"+inst+" 实例 × 每实例 "+inflMax+"；prefill "+(Tpf*1000).toFixed(0)+" ms，利用率 "+(100*pfUtil).toFixed(0)+"%）——吞吐与容量按上限计；要满足需求需加节点 / 降上下文 / 换更小模型（decode 占用 "+(100*decUtil).toFixed(0)+"%）"});
@@ -659,7 +685,7 @@ function calc(){
                      : {c:"bad",t:"<b>decode 带宽不足</b>：目标 tps "+tps+" tok/s/流 下，每实例只能承载 "+(pd&&pdD?pdD.capS:decCapI)+" 条（单卡 HBM "+bwH+" TB/s，每步要先读激活权重 "+A_GB.toFixed(1)+" GB）；请降 tps / 降上下文 / 换更高带宽卡 / 改 KV 精度"});
   }
   if(pd&&pdP&&pdD){
-    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈（P 池）":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
+    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈（P 池）":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(pdP.tpfEff?"（形状代价后 "+((pdP.tpfEff||Tpf)*1000).toFixed(0)+" ms）":"")+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
     chk.push({c:pdP.bott==="D"?"warn":"ok",t:"D 池（"+pdD.nodes+" 节点 → "+pdD.inst+" 实例 × "+pdD.gd.nodes+"，TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）：decode 供给 "+pdD.lD.toFixed(2)+" req/s（每 D 实例在途 "+pdD.inflD+"，KV 水位按 "+pdD.gd.rep+"× 复制），占用 "+(100*decUtilV).toFixed(0)+"%"+(pdP.bott==="D"?" ← 系统瓶颈（D 池）":(pdP.bott==="需求"?" ← 受需求并发限（两池仍有余量）":""))});
     const sPD=pdP.nodes+pdD.nodes;
     if(sPD>nodes) chk.push({c:"bad",t:"P+D 节点数 "+sPD+" 超过总节点 "+nodes+"：超出 "+(sPD-nodes)+" 节点无法部署，请调整配比"});
