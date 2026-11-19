@@ -494,8 +494,8 @@ function applyPDBalance(force){
   const curP=+$("pnodes").value||0, curD=+$("dnodes").value||0;
   if(b.best && (force || (curP===0&&curD===0) || (!pdUserEdited && (curP!==b.best.nP||curD!==b.best.nD)))){
     $("pnodes").value=b.best.nP; $("dnodes").value=b.best.nD;
-  }else if(!b.best && (force || !pdUserEdited)){
-    $("pnodes").value=0; $("dnodes").value=0;   // 总节点装不下两池：清零，说明行给出最小节点要求
+  }else if(!b.best && force){
+    $("pnodes").value=0; $("dnodes").value=0;   // 用户主动点推荐且确实无解：清零，说明行给出原因
   }
   calc();
 }
@@ -649,7 +649,16 @@ function calc(){
                             : "需求参数：需求 "+infl+" 已超<b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）—— 超出部分不产生吞吐，容量按 "+(inst*inflMax)+" 计");
   $("d_inflmax").textContent = grid ? ((inst*inflMax)+" 条（每实例 "+inflMax+" × "+inst+" 实例；受限项："+((Tsvc/Tpf)<=decCapI?"prefill 算力":"decode 带宽")+"；需求 "+infl+" → 有效 "+Ceff+"）") : dash;
   $("d_work").textContent = grid ? (humanGB(capWork)+(Ceff<infl?"（按有效并发 "+Ceff+"/"+infl+"）":"")) : dash;
-  if(pd&&pdP&&pdD){
+  if(pd && (!pdP||!pdD)){
+    const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    let why;
+    if(nP<=0||nD<=0) why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入 P / D 节点数";
+    else if(!pdP) why="P 池 "+nP+" 节点无法形成可部署实例 —— "+whyNoInst(m,g,hbm,Weff,nP).replace(/当前每节点/g,"每节点").replace(/→ 另一条路.*$/,"");
+    else if(!pdD) why="D 池 "+nD+" 节点无法形成可部署实例（decode 还要常驻在途 KV，比只放权重更吃显存）—— "+whyNoInst(m,g,hbm,Weff,nD).replace(/→ 另一条路.*$/,"");
+    else why="P 池或 D 池供给为 0";
+    if(nP+nD>nodes) why="P+D = "+(nP+nD)+" 节点 > 总节点 "+nodes+"（超出 "+(nP+nD-nodes)+"）—— "+why;
+    $("pdhint").innerHTML="<b style=\"color:var(--bad)\">当前配比不可部署</b>："+why;
+  } else if(pd&&pdP&&pdD){
     // —— PD 池覆写首屏与明细 ——
     $("r_inst").textContent=pdP.inst; $("r_inst_l").textContent="个 P 实例（每实例 "+pdP.gp.nodes+" 节点）";
     $("r_rack").textContent=pdD.inst; $("r_rack_l").textContent="个 D 实例（每实例 "+pdD.gd.nodes+" 节点）";
