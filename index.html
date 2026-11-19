@@ -99,6 +99,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
           <b style="font-size:13px">PD 池节点配比</b>
           <label style="font-size:12.5px">P 节点 <input id="pnodes" type="number" value="0" min="0" step="1" style="width:58px;padding:5px 7px;text-align:center"></label>
           <label style="font-size:12.5px">D 节点 <input id="dnodes" type="number" value="0" min="0" step="1" style="width:58px;padding:5px 7px;text-align:center"></label>
+          <span id="pdidle" style="font-size:12.5px;padding:5px 9px;border:1px dashed var(--line);border-radius:6px;background:#fff;color:var(--sub)"></span>
           <button id="pdbal" type="button" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">按算力均衡推荐</button>
         </div>
         <div class="hint" id="pdhint" style="margin-top:5px"></div>
@@ -503,6 +504,16 @@ function applyPDBalance(force){
   }
   calc();
 }
+// —— PD 配比行的「闲置 / 超出」实时合计 ——
+function updPDIdle(nP,nD,nodes){
+  const el=$("pdidle"); if(!el) return;
+  if(!$("pd").checked){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  const idle=nodes-nP-nD;
+  if(idle>0) el.innerHTML='闲置 <b>'+idle+'</b> 节点（P+D '+(nP+nD)+' + 闲置 '+idle+' = 总节点 '+nodes+'）';
+  else if(idle===0) el.innerHTML='已用满 <b>'+nodes+'</b> 节点（P+D='+nodes+'）';
+  else el.innerHTML='<b style="color:var(--bad)">超出 '+(-idle)+' 节点</b>（P+D '+(nP+nD)+' &gt; 总节点 '+nodes+'）';
+}
 // —— 上下文口径：单值 / 区间（正态分布，min/max 视为 μ∓3σ）——
 function ctxStats(){
   const dist = $("ctxmode").value==="dist";
@@ -515,6 +526,7 @@ function ctxStats(){
 function calc(){
   // —— 输入解析与守卫（P2-2）——
   const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
+  if(!$("pd").checked) updPDIdle(0,0,0);
   const m=MODELS[+sel.value], pf=Math.max(0.05,num("pf",2)), hbm=Math.max(1,num("hbm",144)),
         g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
         bw=+$("bw").value||1, bk=+$("bk").value||2, bwH=Math.max(0.1,num("hbmbw",3.35)),
@@ -558,6 +570,7 @@ function calc(){
   const pdRec = pd ? pdBestSplit() : null;
   if(pd){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    updPDIdle(nP,nD,nodes);
     const lg = legalList(m,g,Math.max(nP,nD));
     const pPl = nP>0 ? supplyAt(m,g,hbm,pf,fl,nP,nodes,lg,Math.max(1,+$("ttft").value||500),Weff) : null;
     const dPl = nD>0 ? dAt(m,g,hbm,pf,tps,S_GB,Weff,nD,infl,lg,bwH,A_GB) : null;
@@ -655,6 +668,7 @@ function calc(){
   $("d_work").textContent = grid ? (humanGB(capWork)+(Ceff<infl?"（按有效并发 "+Ceff+"/"+infl+"）":"")) : dash;
   if(pd && (!pdP||!pdD||((pdP&&pdD)&&(pdP.nodes+pdD.nodes>nodes)))){
     const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    updPDIdle(nP,nD,nodes);
     let why;
     if(nP<=0||nD<=0){
       const bud=g*hbm*UTIL, szs=[...new Set(legalList(m,g,Math.max(64,nodes)).map(x=>x.s))].sort((a,b)=>a-b);
