@@ -107,7 +107,15 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <div class="card"><h2>负载与 SLA</h2>
       <div class="grid2">
         <div class="f"><label><b id="inflight_lbl">峰值并发请求数</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发请求数（全部实例合计）；硬件只决定上限。默认按 λ 最大反解：P 池打满（并发 = P 供给 × 输出长 ÷ tps），D 池「够服务该并发」即止——但 D 必须放一份完整权重，其最小节点数往往已远超并发所需的 decode 算力（大模型下 D 利用率偏低，明细可见）；手改并发后不再自动跟随，换模型/切 PD 会重算</div></div>
-        <div class="f"><label><b>上下文平均长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
+        <div class="f"><label><b>上下文长度</b>（token）</label>
+          <select id="ctxmode" style="margin-bottom:6px"><option value="single" selected>单值（按平均值估算）</option><option value="dist">区间（按正态分布估算）</option></select>
+          <div id="ctxsingle"><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
+          <div id="ctxdist" style="display:none;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="color:var(--sub);font-size:12.5px">最小</span><input id="ctxmin" type="number" value="16384" step="1024" min="1" style="width:110px">
+            <span style="color:var(--sub);font-size:12.5px">最大</span><input id="ctxmax" type="number" value="114688" step="1024" min="1" style="width:110px">
+          </div>
+          <div class="hint" id="ctxhint"></div>
+        </div>
         <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
         <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
         <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
@@ -208,6 +216,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
     <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
     <b>并行网格偏好</b>：TP ≤ <b>256 卡（1 个 NV 域）</b>、PP ≤ 8；域内跨节点 TP 属正常形态（NVLink 交换），超出 NV 域才警示并计入跨域 RDMA 代价；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
+    <b>上下文口径（v1.9.17）</b>：可选<b>单值</b>（全部请求同一长度）或<b>区间（正态分布）</b>——区间取 <b>μ=(最小+最大)/2、σ=(最大−最小)/6</b>（端点视为 μ∓3σ）；<b>单请求 KV 与写入带宽按 μ</b> 计，<b>prefill 计算量按 E[ctx²]=μ²+σ²</b> 计（注意力项对长度是二次的）。实际分布若偏长尾（非正态），请把最大值取到 P95~P99 再评估。<br>
     <b>超节点拓扑与并行形状代价（v1.9.16，系数固定不可调）</b>：<b>1 个 NV 域 = 256 卡</b>（32 节点 × 8 卡；64 节点 = 2 个 NV 域，依次类推）；域内跨节点仍走 NVLink 交换，<b>跨域走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 约 2.25×）</b>。
     <b>TP 上限 = 256 卡（= 1 个 NV 域、32 节点）</b>，同一实例尺寸会把 TP16×PP4 / TP32×PP2 / TP64×PP1 等多套合法并行都纳入比较。
     <b>TP 代价</b>：ring 上跨机链路占比 f=2×跨机台数÷TP（每过一台机 2 条）；域内单跳 ≈1.11×、跨域单跳 ≈2.25×，得 all-reduce 耗时倍数，再按「通信占 prefill 的 35%」阻尼（MFU 50% 已含平均通信停顿）：<b>倍数 = 1 + 0.35×(耗时倍数−1)</b>。
@@ -389,11 +398,11 @@ function singlePlan(m,g,hbm,pf,fl,tps,nout,S,W,nodes,C,bwH,A_GB){
 // —— PD 配比推荐：给定总并发 C，D 只需够服务 C，其余节点给 P（λ=min(D 并发、P 供给) 最大）——
 function pdBestSplit(){
   const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
-  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
   const C=Math.max(1,Math.round(+$("inflight").value||40));
   const bwv=+$("bw").value||1, bkv=+$("bk").value||1;
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
-  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
   const W=m.W*bwv, tps=Math.max(0.5,+$("tps").value||80), ttftMs=Math.max(1,+$("ttft").value||500);
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
@@ -414,10 +423,10 @@ function pdBestSplit(){
 // —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
 function bestUtilSplit(){
   const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
-  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
   const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
-  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const ttftMs=Math.max(1,+$("ttft").value||500);
@@ -437,10 +446,10 @@ function bestUtilSplit(){
 // 非 PD：并发默认取「集群可持续上限」（实例数 × 每实例可持续流）
 function bestSingleCap(){
   const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
-  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
   const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
-  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), budNode=g*hbm*UTIL;
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   let best=null;
@@ -468,6 +477,15 @@ function applyPDBalance(force){
   }
   calc();
 }
+// —— 上下文口径：单值 / 区间（正态分布，min/max 视为 μ∓3σ）——
+function ctxStats(){
+  const dist = $("ctxmode").value==="dist";
+  if(!dist){ const c=Math.max(1,Math.round(+$("ctx").value||65536)); return {mean:c, sq:c*c, dist:false, min:c, max:c, sd:0}; }
+  let lo=Math.max(1,Math.round(+$("ctxmin").value||1)), hi=Math.max(1,Math.round(+$("ctxmax").value||1));
+  if(hi<lo){ const t=lo; lo=hi; hi=t; }
+  const mean=(lo+hi)/2, sd=(hi-lo)/6;                 // 区间端点 ≈ μ∓3σ
+  return {mean, sq:mean*mean+sd*sd, dist:true, min:lo, max:hi, sd};
+}
 function calc(){
   // —— 输入解析与守卫（P2-2）——
   const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
@@ -475,7 +493,7 @@ function calc(){
         g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
         bw=+$("bw").value||1, bk=+$("bk").value||2, bwH=Math.max(0.1,num("hbmbw",3.35)),
         pd=$("pd").checked,
-        infl=Math.max(1,Math.round(num("inflight",40))), ctx=Math.max(1,Math.round(num("ctx",65536))),
+        infl=Math.max(1,Math.round(num("inflight",40))), ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq,
         nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",80)),
         ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2)),
         n0=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>=0?v:d;},
@@ -484,6 +502,9 @@ function calc(){
         riskY=(elife===null?3:elife),
         bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100;
 
+  $("ctxhint").innerHTML = ctxI.dist
+     ? ("正态口径：μ="+ctx.toLocaleString()+"、σ="+(ctxI.sd||0).toLocaleString("zh",{maximumFractionDigits:0})+"（区间端点按 μ∓3σ）；单请求 KV/带宽按 μ 计，prefill 计算量按 <b>E[ctx²]=μ²+σ²</b> 计 → 等效 "+(Math.sqrt(ctx2)).toFixed(0)+" tok")
+     : ("单值口径：按 "+ctx.toLocaleString()+" 估算（等价于所有请求同一长度）");
   $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
   { const basisTxt = pfBasisLabel(), custom = (+$("gpu").value===0);
     $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 权重精度 → 「"+basisTxt+"」算力 —— "
@@ -501,7 +522,7 @@ function calc(){
   const A_GB=m.P*bw;            // decode 每步必读的「激活权重」（MoE 只读激活专家；稠密模型即全部权重）   // Weff = 每实例权重（单份）；全系统份数 = 实例总数（P、D 实例不共享权重）
 
   // —— 布局：以「集群总并发 C」为需求。非 PD 单池；PD 两池（P 按吞吐、D 按并发）——
-  const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
   const sp = pd ? null : singlePlan(m,g,hbm,pf,fl,tps,nout,S_GB,Weff,nodes,infl,bwH,A_GB);
   let nInst=0, grid=null, rep=1, inst=0, perInst=0, Ceff=0, lamInst=0;
   if(sp){ nInst=sp.s; grid=[sp.g.tp,sp.g.pp]; rep=sp.g.rep; inst=sp.k; perInst=sp.perInst; Ceff=sp.streams; }
@@ -672,6 +693,7 @@ function calc(){
 
   // —— 风险告警 ——
   const chk=[];
+  if(ctxI.max>(m.ctx||Infinity)) chk.push({c:"bad",t:"上下文上限 "+ctxI.max.toLocaleString()+" 超出模型支持的最大上下文 "+(m.ctx||0).toLocaleString()+"：请下调区间上限（或换支持更长上下文的模型）"});
   if(pd){ /* PD 模式告警在下方 pools 分支统一给出 */ }
   else if(!grid){
     chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+50% 常驻的复制 KV），当前仅 "+nodes+" 节点"
@@ -800,12 +822,12 @@ function pdSyncUI(){
 // 并发默认值 = 「让双池都打满」的自洽点；用户手改过并发后不再自动覆盖（换模型/切 PD 会重算）
 function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」的并发
   const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
-  const ctx=Math.max(1,Math.round(+$("ctx").value||65536)), nout=Math.max(1,Math.round(+$("nout").value||512));
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
   const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
   const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
   if(nP<=0||nD<=0) return null;
   const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
-  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx*ctx;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
   const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,Math.max(nP,nD));
   const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
   const ttftMs=Math.max(1,+$("ttft").value||500);
@@ -846,6 +868,11 @@ $("pnodes").addEventListener("input",()=>pdUserEdited=true);
 $("dnodes").addEventListener("input",()=>pdUserEdited=true);
 $("pd").addEventListener("change",()=>{ pdSyncUI(); pdUserEdited=false; inflUserEdited=false; autoDemand(true); calc(); });
 $("pdbal").addEventListener("click",()=>{ pdUserEdited=false; applyPDBalance(true); });
+$("ctxmode").addEventListener("change",()=>{ const d=$("ctxmode").value==="dist";
+  $("ctxsingle").style.display=d?"none":"block"; $("ctxdist").style.display=d?"flex":"none";
+  recalc(); });
+$("ctxsingle").style.display=$("ctxmode").value==="dist"?"none":"block";
+$("ctxdist").style.display=$("ctxmode").value==="dist"?"flex":"none";
 document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
 pdSyncUI();
 autoDemand(true);
