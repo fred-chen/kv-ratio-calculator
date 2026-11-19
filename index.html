@@ -511,9 +511,8 @@ function updPDIdle(nP,nD,nodes){
   el.style.display="";
   const idle=nodes-nP-nD;
   el.title="总节点 "+nodes+" = P "+nP+" + D "+nD+" + 闲置 "+Math.max(0,idle);
-  if(idle>0) el.innerHTML='闲置 <b>'+idle+'</b>（'+nodes+'−'+nP+'−'+nD+'）';
-  else if(idle===0) el.innerHTML='闲置 <b>0</b>（'+nodes+'−'+nP+'−'+nD+'，已用满）';
-  else el.innerHTML='<b style="color:var(--bad)">超出 '+(-idle)+'</b>（'+nodes+'−'+nP+'−'+nD+'）';
+  if(idle>=0) el.innerHTML='闲置 <b>'+idle+'</b> = '+nodes+'−'+nP+'−'+nD;
+  else el.innerHTML='<b style="color:var(--bad)">超出 '+(-idle)+'</b>：'+(nP+nD)+' &gt; '+nodes;
 }
 // —— 上下文口径：单值 / 区间（正态分布，min/max 视为 μ∓3σ）——
 function ctxStats(){
