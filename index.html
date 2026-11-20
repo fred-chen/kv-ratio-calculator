@@ -233,7 +233,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项为工程简化式（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×，TTFT 校核相应偏乐观。</p>
     <h3>计算链</h3>
     <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
-    到达率 = <b>有效并发</b> ÷ 单请求服务时长（有效并发 = min(<b>峰值并发（集群总）</b>, 集群上限)；<b>换模型 / 切换 PD / 改节点或卡数后，这个输入会自动对齐「算力上限」那条的值</b>（= 当前配比的能力上限）：**任何参数一改（模型、卡型、节点/卡数、精度、tps、上下文、TTFT、忙闲、寿命要求…）都会重置成这个值**，只有正在编辑该输入框本身时不重置；非 PD 的集群上限 = 实例数 × 每实例可持续流 ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋；PD 的集群上限 = D 池可服务流 min(decode 算力, 显存可驻)；<b>非 PD 与 PD 统一按可持续口径</b>，需求超出上限只拉低并发、不虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发请求数给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「峰值并发请求数」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
+    到达率 = <b>有效并发</b> ÷ 单请求服务时长（有效并发 = min(<b>峰值并发（集群总）</b>, 集群上限)；<b>换模型 / 切换 PD / 改节点或卡数后，这个输入会自动对齐「算力上限」那条的值</b>（= 当前配比的能力上限）：**任何参数一改（模型、卡型、节点/卡数、精度、tps、上下文、TTFT、忙闲、寿命要求…）都会重置成这个值**，只有正在编辑该输入框本身时不重置；**把并发下调到全集群能力以下时，推荐配比只占「刚好够用」的节点，其余节点会标为闲置**；非 PD 的集群上限 = 实例数 × 每实例可持续流 ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋；PD 的集群上限 = D 池可服务流 min(decode 算力, 显存可驻)；<b>非 PD 与 PD 统一按可持续口径</b>，需求超出上限只拉低并发、不虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发请求数给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「峰值并发请求数」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
     <h3>模型库（14 款，点开看架构）</h3>
     <details><summary>展开模型数据库</summary>
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
@@ -297,7 +297,8 @@ sel.addEventListener("change",()=>{ applyModelDefaults(); syncPf(); inflUserEdit
 applyModelDefaults();   // 初始状态 = 默认模型的原生精度，与「切走再切回」完全一致
 showPfBadge();
 
-let LAST_CAP=0;   // 最近一次 calc 得到的「集群能力上限（在途条数）」，用于把默认并发对到能力值
+let LAST_CAP=0;        // 当前配比的在途上限（供显示/局部用）
+let LAST_CAP_FULL=0;   // 全集群最大在途能力（不受当前配比是否收缩影响）——默认并发按它重置
 const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5, DWPD_YEARS=5;   // DWPD 的保修期基准（年）   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
 const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
 
@@ -454,6 +455,42 @@ function pdBestSplit(){
       best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
   }
   if(!best||best.l<=1e-9) return {best:null,minD,minN};
+  // —— 全集群最大能力（需求不受限，用全部节点）：给默认并发重置与「是否该收缩」做基准 ——
+  {
+    let fullBest=null;
+    for(let nD=1;nD<nodes;nD++){
+      const nP=nodes-nD;
+      const dP=dAt(m,g,hbm,pf,tps,S,W,nD,1e9,legal,bwH,A_GB);
+      const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
+      if(!dP||!pP||pP.supply<=0||dP.streams<=0) continue;
+      const l=Math.min(dP.eff*tps/nout, pP.supplyEff);
+      if(!fullBest||l>fullBest.l) fullBest={l,dP,pP};
+    }
+    if(fullBest) LAST_CAP_FULL=Math.min(Math.floor(fullBest.pP.supplyEff*nout/tps), fullBest.dP.capS*fullBest.dP.k, fullBest.dP.memMax*fullBest.dP.k);
+  }
+  // —— 需求导向：若「刚好满足当前需求」所需的节点数少于总节点，就只分配这么多，其余显式闲置 ——
+  {
+    let dMin=0,dBest=null;
+    for(let nD=1;nD<nodes;nD++){
+      const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB);
+      if(dP&&dP.eff>=C*0.99&&dP.memMax>=C&&dP.capS*dP.k>=C){ dMin=nD; dBest=dP; break; }   // 有效流也要够（形状代价后仍能顶住需求）
+    }
+    if(dMin && C<LAST_CAP_FULL*0.99){   // 只有把并发下调到「全集群能力」以下时才收缩节点
+      let pMin=0,pBest=null;
+      for(let nP=1;nP<=nodes-dMin;nP++){
+        const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
+        if(pP&&pP.supplyEff*nout/tps>=C*0.99){ pMin=pP.used; pBest=pP; break; }
+      }
+      if(pMin){
+        const T=pMin+dMin, pCap=Math.floor(pBest.supplyEff*nout/tps);
+        const capAll=Math.min(pCap, dBest.capS*dBest.k, dBest.memMax*dBest.k);
+        if(T<=nodes && capAll>=C*0.99){
+          best={nP:pMin,nD:dMin,l:Math.min(dBest.eff*tps/nout,pBest.supplyEff),used:T,usedSum:T,waste:0,
+                pEff:pBest.supplyEff,pInst:pBest.k,dInst:dBest.k,sP:pBest.s,sD:dBest.s};
+        }
+      }
+    }
+  }
   { const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs);
     if(st){ best.nP=st.nP; best.nD=st.nD; best.l=Math.min(st.dP.eff*tps/nout, st.pP.supplyEff); best.pInst=st.pP.k; best.dInst=st.dP.k; best.sP=st.pP.s; best.sD=st.dP.s; } }
   return {best,minD,minN};
@@ -634,7 +671,8 @@ function calc(){
   const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
   const capWork = (pd&&pdD) ? pdD.streams*S_GB*RED : Ceff*S_GB*RED;   // 在途工作集×1.2（按有效并发）
   const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
-  LAST_CAP = pd ? 0 : ((grid&&inst>0) ? inst*inflMax : 0);   // 非 PD：集群在途上限
+  LAST_CAP = pd ? 0 : ((grid&&inst>0) ? inst*inflMax : 0);
+  if(!pd) LAST_CAP_FULL = LAST_CAP;                           // 非 PD：全集群能力 = 当前配比能力
 
 
   // —— 输出 ——
@@ -939,8 +977,12 @@ function autoDemand(force){
 function snapInfl(){
   if(inflUserEdited) return;
   calc();
-  const cap=LAST_CAP;
-  if(cap>0 && (+$("inflight").value||0)!==cap){ $("inflight").value=cap; calc(); }
+  const cap=LAST_CAP_FULL||LAST_CAP;
+  if(cap>0 && (+$("inflight").value||0)!==cap){
+    $("inflight").value=cap;
+    if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc();   // 并发回到能力值后，配比也重解回满配
+  }
+  if(LAST_CAP>0 && (+$("inflight").value||0)>LAST_CAP){ $("inflight").value=LAST_CAP; calc(); }   // 收敛到当前配比真实可达上限，避免“需求 > 有效”
 }
 function recalc(src){
   const filled=autoDemand(false);
@@ -948,8 +990,12 @@ function recalc(src){
   else calc();
   // 任何参数变化（除了正在编辑并发输入框本身）→ 并发重置为当前配比的能力上限
   if(src!=="inflight"){
-    const cap=LAST_CAP;
-    if(cap>0 && (+$("inflight").value||0)!==cap){ $("inflight").value=cap; calc(); }
+    const cap=LAST_CAP_FULL||LAST_CAP;
+    if(cap>0 && (+$("inflight").value||0)!==cap){
+      $("inflight").value=cap;
+      if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc();   // 并发回到能力值后重解配比
+    }
+    if(LAST_CAP>0 && (+$("inflight").value||0)>LAST_CAP){ $("inflight").value=LAST_CAP; calc(); }
   }
 }
 $("inflight").addEventListener("input",()=>inflUserEdited=true);
