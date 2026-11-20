@@ -233,7 +233,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
     <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项为工程简化式（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×，TTFT 校核相应偏乐观。</p>
     <h3>计算链</h3>
     <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
-    到达率 = <b>有效并发</b> ÷ 单请求服务时长（有效并发 = min(<b>峰值并发（集群总）</b>, 集群上限)；<b>换模型 / 切换 PD / 改节点或卡数后，这个输入会自动对齐「算力上限」那条的值</b>（= 当前配比的能力上限，会覆盖你之前手填的值）；只有 tps、上下文、SLA 等普通参数变化时不会覆盖；非 PD 的集群上限 = 实例数 × 每实例可持续流 ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋；PD 的集群上限 = D 池可服务流 min(decode 算力, 显存可驻)；<b>非 PD 与 PD 统一按可持续口径</b>，需求超出上限只拉低并发、不虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发请求数给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「峰值并发请求数」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
+    到达率 = <b>有效并发</b> ÷ 单请求服务时长（有效并发 = min(<b>峰值并发（集群总）</b>, 集群上限)；<b>换模型 / 切换 PD / 改节点或卡数后，这个输入会自动对齐「算力上限」那条的值</b>（= 当前配比的能力上限）：**任何参数一改（模型、卡型、节点/卡数、精度、tps、上下文、TTFT、忙闲、寿命要求…）都会重置成这个值**，只有正在编辑该输入框本身时不重置；非 PD 的集群上限 = 实例数 × 每实例可持续流 ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋；PD 的集群上限 = D 池可服务流 min(decode 算力, 显存可驻)；<b>非 PD 与 PD 统一按可持续口径</b>，需求超出上限只拉低并发、不虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发请求数给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「峰值并发请求数」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
     <h3>模型库（14 款，点开看架构）</h3>
     <details><summary>展开模型数据库</summary>
       <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
@@ -941,10 +941,15 @@ function snapInfl(){
   const cap=LAST_CAP;
   if(cap>0 && (+$("inflight").value||0)!==cap){ $("inflight").value=cap; calc(); }
 }
-function recalc(){
+function recalc(src){
   const filled=autoDemand(false);
   if(!filled && $("pd").checked && !pdUserEdited) applyPDBalance(false);
   else calc();
+  // 任何参数变化（除了正在编辑并发输入框本身）→ 并发重置为当前配比的能力上限
+  if(src!=="inflight"){
+    const cap=LAST_CAP;
+    if(cap>0 && (+$("inflight").value||0)!==cap){ $("inflight").value=cap; calc(); }
+  }
 }
 $("inflight").addEventListener("input",()=>inflUserEdited=true);
 $("pnodes").addEventListener("input",()=>pdUserEdited=true);
@@ -963,7 +968,7 @@ function reSolvePD(){
   if(!autoDemand(true)){ $("pnodes").value=0; $("dnodes").value=0; calc(); } else snapInfl();
 }
 ["nodes","g","gpu","hbm"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("input",reSolvePD); });
-document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",recalc));
+document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",()=>recalc(e.id)));
 pdSyncUI();
 autoDemand(true);
 snapInfl();   // 初始化：默认并发 + 配比已由 autoDemand 反解，避免再被固定并发口径的推荐覆盖
