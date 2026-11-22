@@ -452,8 +452,7 @@ function evalMixed(b,sc,withStore){
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const tRead=(use>0&&totBW>0)?readPerReq*best.k/totBW:0;
   const prefTok=withStore?b.fresh:b.prefix;
-  const resident=lam*(S_pfx+outKV);                            // 常驻数据量速率：命中前缀也要占容量
-  const capHave=devsIn*capdev*1000, effWinHave=resident>0?capHave/(resident*3600):Infinity;
+  const capHave=devsIn*capdev*1000, effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;   // 窗口 = 容量 ÷ 写入速率（新前缀+输出）
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
@@ -489,8 +488,7 @@ function evalScene(b,sc,withStore){
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   const capHave=devsIn*capdev*1000;                          // 现有采购容量（GB）
-  const resident=lam*(b.S_pfx+outKV);                        // 常驻数据：命中前缀 + 输出增量都要占容量
-  const effWinHave=resident>0?capHave/(resident*3600):Infinity;  // 现有容量能保留多久
+  const effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;  // 现有容量能保留多久（按写入速率）
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
@@ -526,7 +524,7 @@ function outTable(res,withStore,note,scNote){
         '<div><b>'+humanGB(res.capHave)+'</b><span>现有容量 · '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB '+ok(res.capOK)+'</span>'+
           '<span class="sub">需求 '+humanGB(res.capFinal)+'（需 '+res.devsNeed+' 台，按寿命反推）</span></div>'+
         '<div><b>'+(Number.isFinite(res.effWinHave)?fmt(res.effWinHave,1)+' h':'–')+'</b><span>实际保留窗口（派生值）</span>'+
-          '<span class="sub">现有容量 ÷ 常驻速率（含命中前缀），约 '+fmt(res.effWinHave/24,1)+' 天</span></div>'+
+          '<span class="sub">现有容量 ÷ 写入速率（新前缀+输出），约 '+fmt(res.effWinHave/24,1)+' 天</span></div>'+
         '<div><b>'+(Number.isFinite(res.lifeHave)?fmt(res.lifeHave,1)+' 年':'–')+'</b><span>实际寿命 '+ok(res.lifeOK)+'</span>'+
           '<span class="sub">要求 ≥ '+fmt(res.elife,1)+' 年 ｜ DWPD×现有容量×5 年÷日写入</span></div>'+
         '<div><b>'+fmt(res.totBW)+'</b><span>现有带宽 GB/s '+ok(res.bwOK)+'</span>'+
@@ -558,10 +556,9 @@ function outTable(res,withStore,note,scNote){
     rows.push(["命中读回 / 请求",fmt(res.readPerReq)+" GB"]);
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
-    const Sx=res.use<1?Math.max(0,(res.perReqWrite-res.outKV)/(1-res.use)):0;
-    const perReqKV=Sx+res.outKV, residentRate=(res.lam||0)*perReqKV;
-    rows.push(["可保存前缀数（常驻口径）",(perReqKV>0?fmt(res.capHave/perReqKV,0):"–")+" 个（每前缀 "+humanGB(perReqKV)+"）"]);
-    rows.push(["窗口反推式","容量 ÷ [λ × (每 token KV × 上下文 + 输出 KV)] = "+humanGB(res.capHave)+" ÷ ("+fmt(res.lam,2)+" req/s × "+humanGB(perReqKV)+")"+(residentRate>0?" = "+fmt(res.capHave/(residentRate*3600),1)+" h":"")]);
+    const perReqKV=Math.max(1e-9,res.perReqWrite), wrRate=res.wrMiss;
+    rows.push(["可保存前缀数（按写入量）",(perReqKV>0?fmt(res.capHave/perReqKV,0):"–")+" 个（每请求写入 "+humanGB(perReqKV)+"）"]);
+    rows.push(["窗口反推式","容量 ÷ 写入速率 = "+humanGB(res.capHave)+" ÷ "+fmt(wrRate)+" GB/s"+(wrRate>0?" = "+fmt(res.capHave/(wrRate*3600),1)+" h":"")]);
     rows.push(["容量需求（寿命反推）","按 DWPD "+fmt(res.dwpd,2)+"、期待 "+fmt(res.elife,1)+" 年 → "+humanGB(res.capFinal)+"（现有 "+humanGB(res.capHave)+"）"]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
