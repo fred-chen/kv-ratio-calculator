@@ -446,9 +446,14 @@ function evalMixed(b,sc,withStore){
     }
     if(!(lam>0)) continue;
     const lamRaw=lam;                                              // 不承诺 ITL 时的吞吐上限
-    const totalCompute=used*g*pf*MFU*1e15, prefillSec=flEff*fac;
-    const lamSlo=prefillSec>0?totalCompute*(SLO_TOL/SLO_ALPHA)/prefillSec:Infinity;   // duty ≤ 50%
-    if(lamSlo<lam){ lam=lamSlo; bnd="SLO（ITL 抖动）"; }
+    const C=used*g*pf*MFU*1e15;                                    // 集群可用算力 FLOP/s
+    const Bw=used*g*bwH*1000;                                      // 集群可用 HBM 带宽 GB/s
+    const prefillFL=flEff*fac;                                     // 每请求 prefill 算力
+    const prefillBW=W+(1-use)*S_pfx;                               // 每请求 prefill 的 HBM 流量（读权重 + 写 KV）GB
+    const lamC=prefillFL>0?C*SLO_TOL/prefillFL:Infinity;           // 算力份额 ≤ tol
+    const lamB=prefillBW>0?Bw*SLO_TOL/prefillBW:Infinity;          // 带宽份额 ≤ tol
+    const lamSlo=Math.min(lamC,lamB);
+    if(lamSlo<lam){ lam=lamSlo; bnd=lamB<lamC?"SLO（HBM 带宽争用）":"SLO（算力争用）"; }
     const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
                 capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
@@ -469,8 +474,11 @@ function evalMixed(b,sc,withStore){
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/(best.used*g*pf*MFU*1e15)):0;
-  const speed=b.tps*(1-SLO_ALPHA*duty);
-  const itlMs=speed>0?1000/speed:Infinity, goodput=lam*Math.min(1,speed/b.tps);
+  const shareC=Math.max(0,1-lam*flEff*best.fac/Math.max(1e-9,(best.used*g*pf*MFU*1e15)));
+  const shareB=Math.max(0,1-lam*(b.W+(1-use)*b.S_pfx)/Math.max(1e-9,(best.used*g*bwH*1000)));
+  const share=Math.min(shareC,shareB);
+  const speed=b.tps*share;
+  const itlMs=speed>0?1000/speed:Infinity, goodput=lam*share;
   return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw!=null?best.lamRaw:lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,duty,speed,itlMs,goodput,
           wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
           prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
@@ -615,8 +623,7 @@ function compare(A,B,note){
 /* ---------- 主流程 ---------- */
 let LAST_A=null, LAST_B=null, PD_AUTO=true, PD_MANUAL=false, LAST_SIG="";
 const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s），由 decode 目标隐含，不新增输入
-const SLO_ALPHA=0.2;  // prefill 与 decode 可部分重叠：速度损失 ≈ 20% × 前缀算力占比（不是全串行）
-const PD_EDGE=1.15;   // PD 需明显更优（容量 ≥ +15%）才推荐，否则选更易运维的混部
+const PD_EDGE=1.0;    // 不考虑工程复杂度：谁的服务水平高就选谁
 function recalc(){
   const b0=readBase();
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
