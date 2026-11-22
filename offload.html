@@ -413,7 +413,6 @@ function pickSplit(b,sc){
 
 
 
-const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s）
 
 /* ---------- 混部（节点不足以拆分 P/D 池时回退） ---------- */
 function evalMixed(b,sc,withStore){
@@ -457,10 +456,14 @@ function evalMixed(b,sc,withStore){
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
+  // 平均 TPOT 仍是 1/tps；混部只增加 P99 抖动：一次 prefill chunk 占满 SM 时 decode 要等
+  const chunkTok=2048;                                            // 典型 chunked prefill 块大小
+  const instPrefillTokps = best.used>0 ? (best.used*g*pf*MFU*1e15)/(2*m.P*1e9*Math.max(1,best.fac)) : 0;
+  const stallMs = instPrefillTokps>0 ? 1000*chunkTok/instPrefillTokps : 0;
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
-  const speed=b.tps*(1-duty);
+  const itlMs=1000/b.tps+stallMs;                                 // 平均 + chunk 阻塞
   return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
-    duty,speed,itlMs:speed>0?1000/speed:Infinity,
+    duty,stallMs,itlMs,
     wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
     prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
     svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
@@ -540,7 +543,7 @@ function outTable(res,withStore,note,scNote){
   }
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
-      ? ("≈ "+fmt(res.itlMs,1)+" ms（约 "+fmt(1000/res.itlMs,1)+" tok/s；前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=tgt/(1-SLO_TOL)+0.05?' <span class="good">✓ 达标</span>':' <span class="bad">✗ 超标</span>'))
+      ? ("平均 "+fmt(tgt,1)+" ms ＋ chunk 阻塞 "+fmt(res.stallMs,1)+" ms ≈ P99 "+fmt(res.itlMs,1)+" ms（前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=2*tgt+0.05?' <span class="good">✓ P99 ≤ 2×平均</span>':' <span class="bad">✗ P99 超标</span>'))
       : (fmt(tgt,1)+" ms（D 池纯 decode，无前缀干扰）<span class=\"good\">✓ 达标</span>")]); }
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s = 输出 "+(res.nout||0)+" ÷ 目标 "+fmt(+$("tps").value||80,0)+" tok/s，是目标值不是上限）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
