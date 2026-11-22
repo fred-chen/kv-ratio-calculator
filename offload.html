@@ -445,10 +445,11 @@ function evalMixed(b,sc,withStore){
       bnd=capB;
     }
     if(!(lam>0)) continue;
+    const lamRaw=lam;                                              // 不承诺 ITL 时的吞吐上限
     const totalCompute=used*g*pf*MFU*1e15, prefillSec=flEff*fac;
     const lamSlo=prefillSec>0?totalCompute*SLO_TOL/prefillSec:Infinity;
     if(lamSlo<lam){ lam=lamSlo; bnd="SLO（ITL 抖动）"; }
-    const cand={s,k,used,g:g0,fac,lam,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
+    const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
                 capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
     if(!best||okT>best.okT||(okT===best.okT&&(lam>best.lam+1e-9||(Math.abs(lam-best.lam)<=1e-9&&
@@ -470,7 +471,7 @@ function evalMixed(b,sc,withStore){
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/(best.used*g*pf*MFU*1e15)):0;
   const speed=b.tps*(1-SLO_ALPHA*duty);
   const itlMs=speed>0?1000/speed:Infinity, goodput=lam*Math.min(1,speed/b.tps);
-  return {ok:true,pd:false,best,inst:best,lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,duty,speed,itlMs,goodput,
+  return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw!=null?best.lamRaw:lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,duty,speed,itlMs,goodput,
           wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
           prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
           svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
@@ -502,7 +503,7 @@ function evalScene(b,sc,withStore){
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+  return {ok:true,pd:true,best,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -548,6 +549,7 @@ function outTable(res,withStore,note,scNote){
   rows.push(["推荐 D 池（吐）","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s.dSup)+" req/s）"]);
   }
   if(res.pd===false) rows.push(["混部说明","按「算力合计（prefill+decode）」与 HBM 显存/带宽取小；并按 ITL 约束限制前缀算力占比 ≤ "+fmt(100*SLO_TOL,0)+"%，保证单流速度不低于目标的 "+(100*(1-SLO_TOL)).toFixed(0)+"%"]);
+  if(res.pd===false&&res.lamRaw>res.lam*1.01) rows.push(["吞吐上限（不承诺 ITL）","λ_max ≈ "+fmt(res.lamRaw,1)+" req/s ｜ 此时前缀算力占比接近 100%，单流速度会掉到几 tok/s"]);
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
       ? ("≈ "+fmt(res.itlMs,1)+" ms（约 "+fmt(1000/res.itlMs,1)+" tok/s；前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=tgt/(1-SLO_TOL)+0.05?' <span class="good">✓ 达标</span>':' <span class="bad">✗ 超标</span>'))
