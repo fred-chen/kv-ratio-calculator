@@ -127,6 +127,9 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
         </div>
       </div>
       <label class="chk"><input type="checkbox" id="pd" checked> <b>PD 分离部署</b><span>不勾选＝混部：同一实例同时做 prefill 与 decode（改参数后按最佳服务能力自动勾选/取消）</span></label>
+      <div class="f2" style="margin-top:8px">
+        <div class="f"><label><b>混部效率系数</b>（%）</label><input id="mxeff" type="number" value="80" step="5" min="10" max="100"><div class="hint">prefill/decode 争用与调度损失折算；100%＝理想共享</div></div>
+      </div>
       <div class="hint" id="pdhint"></div>
       <h3>负载（典型场景）</h3>
       <div class="f1" style="margin-bottom:10px">
@@ -417,6 +420,7 @@ function pickSplit(b,sc){
 function evalMixed(b,sc,withStore){
   const {m,g,hbm,pf,nodes,legal,dwell,nout,S,S_pfx,W,bwH,ttft,fl}=b;
   const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0;
+  const MXEFF=Math.min(1,Math.max(0.1,(+$("mxeff").value||80)/100));   // 混部效率系数（争用/调度损失）
   const flEff=fl*(1-use), readPerReq=use*S_pfx, decFL=2*m.P*1e9*nout;
   const dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
   const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0)), totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
@@ -445,6 +449,7 @@ function evalMixed(b,sc,withStore){
       bnd=capB;
     }
     if(!(lam>0)) continue;
+    lam*=MXEFF;                                                    // 折掉 prefill/decode 争用
     const cand={s,k,used,g:g0,fac,lam,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
                 capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
@@ -541,7 +546,7 @@ function outTable(res,withStore,note,scNote){
   rows.push(["推荐 P 池（吞）","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
   rows.push(["推荐 D 池（吐）","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s.dSup)+" req/s）"]);
   }
-  if(res.pd===false) rows.push(["混部说明","按「算力合计（prefill+decode）」与 HBM 显存/带宽取小；未计 prefill 与 decode 的相互干扰，真实值通常略低"]);
+  if(res.pd===false) rows.push(["混部说明","按「算力合计（prefill+decode）」与 HBM 显存/带宽取小，再乘混部效率系数 "+fmt(+$("mxeff").value||80,0)+"%（折算 prefill/decode 争用与调度损失）"]);
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
