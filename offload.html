@@ -433,8 +433,12 @@ function evalMixed(b,sc,withStore){
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const tRead=(use>0&&totBW>0)?readPerReq*best.k/totBW:0;
   const prefTok=withStore?b.fresh:b.prefix;
+  const capHave=devsIn*capdev*1000, effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;
+  const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
+  const capOK=capHave>=capFinal, winOK=!Number.isFinite(effWinHave)||effWinHave>=win, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
+  const bwOK=totBW>=(wrMiss+wrRead);
   return {ok:true,pd:false,best,inst:best,lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,
-          wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,tRead,
+          wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,winOK,lifeOK,bwOK,tRead,
           prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,effWinH,daily,withStore,use,
           svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
           win,dwpd,elife,readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -459,10 +463,15 @@ function evalScene(b,sc,withStore){
   const effWinH=wrMiss>0?(capFinal/(wrMiss*3600)):Infinity;   // 采用容量 ÷ 写入速率 = 实际能保留多久
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
+  const capHave=devsIn*capdev*1000;                          // 现有采购容量（GB）
+  const effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;  // 现有容量能保留多久
+  const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
+  const capOK=capHave>=capFinal, winOK=!Number.isFinite(effWinHave)||effWinHave>=win, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
+  const bwOK=totBW>=(wrMiss+wrRead);
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
+  return {ok:true,pd:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,winOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,effWinH,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -486,13 +495,16 @@ function outTable(res,withStore,note,scNote){
     (withStore?(function(){
       const bw=res.wrMiss+res.wrRead, perDev=res.devsIn>0?res.totBW/res.devsIn:0, bwDevs=perDev>0?Math.ceil(bw/perDev):0;
       const usePct=res.totBW>0?(100*bw/res.totBW):0;
+      const ok=v=>v?'<span class="good">✓ 达标</span>':'<span class="bad">✗ 不足</span>';
       return '<div class="kpis store">'+
-        '<div><b>'+humanGB(res.capFinal)+'</b><span>容量需求（采用）· 需 '+res.devsNeed+' 台</span>'+
-          '<span class="sub">窗口 '+humanGB(res.cacheCap)+' ｜ 寿命反推 '+humanGB(res.wcap)+'</span></div>'+
-        '<div><b>'+fmt(bw)+'</b><span>带宽总需求 GB/s · 需 '+bwDevs+' 台</span>'+
-          '<span class="sub">写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+' ｜ 占用 '+(usePct).toFixed(0)+'%（可用 '+fmt(res.totBW)+'）</span></div>'+
-        '<div><b>'+(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+' h':'–')+'</b><span>最终保留窗口 · 约 '+fmt(res.effWinH/24,1)+' 天</span>'+
-          '<span class="sub">采用容量 ÷ 写入速率（含 1.2 冗余）</span></div></div>';
+        '<div><b>'+humanGB(res.capHave)+'</b><span>现有容量 · '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB '+ok(res.capOK)+'</span>'+
+          '<span class="sub">需求 '+humanGB(res.capFinal)+'（需 '+res.devsNeed+' 台）｜ 窗口 '+humanGB(res.cacheCap)+' / 寿命反推 '+humanGB(res.wcap)+'</span></div>'+
+        '<div><b>'+(Number.isFinite(res.effWinHave)?fmt(res.effWinHave,1)+' h':'–')+'</b><span>实际保留窗口 '+ok(res.winOK)+'</span>'+
+          '<span class="sub">要求 ≥ '+fmt(res.win,2)+' h ｜ 现有容量 ÷ 写入速率</span></div>'+
+        '<div><b>'+(Number.isFinite(res.lifeHave)?fmt(res.lifeHave,1)+' 年':'–')+'</b><span>实际寿命 '+ok(res.lifeOK)+'</span>'+
+          '<span class="sub">要求 ≥ '+fmt(res.elife,1)+' 年 ｜ DWPD×现有容量×5 年÷日写入</span></div>'+
+        '<div><b>'+fmt(res.totBW)+'</b><span>现有带宽 GB/s '+ok(res.bwOK)+'</span>'+
+          '<span class="sub">需求 '+fmt(bw)+'（需 '+bwDevs+' 台）｜ 占用 '+(usePct).toFixed(0)+'%</span></div></div>';
     })():'');;
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
@@ -524,6 +536,15 @@ function outTable(res,withStore,note,scNote){
   }
   let h='<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span>'+(withStore?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
   h+=kpi;
+  if(withStore){
+    const miss=[];
+    if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
+    if(!res.winOK) miss.push("保留窗口 "+fmt(res.effWinHave,1)+" h ＜ 要求 "+fmt(res.win,2)+" h");
+    if(!res.lifeOK) miss.push("寿命 "+fmt(res.lifeHave,2)+" 年 ＜ 要求 "+fmt(res.elife,1)+" 年");
+    if(!res.bwOK) miss.push("带宽 "+fmt(res.totBW)+" ＜ 需求 "+fmt(res.wrMiss+res.wrRead)+" GB/s");
+    if(miss.length) h+='<p class="bad" style="font-weight:800;margin:8px 0 2px">✗ 现有配置不满足：'+miss.join("；")+'</p>';
+    else h+='<p class="good" style="font-weight:700;margin:8px 0 2px">✓ 现有 '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB 满足保留窗口 '+fmt(res.win,2)+' h 与寿命 '+fmt(res.elife,1)+" 年</p>";
+  }
   if(note) h+='<p class="hint'+(scNote?" bad":"")+'" style="margin:6px 0 2px">'+note+'</p>';
   h+='<table class="out-tb">'+rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join("")+'</table>';
   if(!withStore) h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；「KV 产生速率」是若必须落盘时需要接住的量。</p>';
