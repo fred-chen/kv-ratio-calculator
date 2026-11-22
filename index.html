@@ -445,7 +445,9 @@ function pdBestSplit(){
     if(dP.streams>0 && !minD) minD=nD;
     if(dP.streams>0 && pP.supply>0 && (!minN||pP.used+dP.used<minN)) minN=pP.used+dP.used;
     if(dP.streams<=0||pP.supply<=0) continue;
-    const l=Math.min(dP.eff*tps/nout, pP.supplyEff);      // 形状代价后可达 λ
+    const dwellL=nout/tps, facL=Math.max(1,dP.fac||1);
+    const capAllL=Math.min(Math.max(1,Math.floor(pP.supplyEff*dwellL)), Math.max(1,Math.floor(dP.capS*dP.k/facL)), Math.max(1,Math.floor(dP.memMax*dP.k/facL)));
+    const l=Math.min(pP.supplyEff, Math.min(C,capAllL)/dwellL);   // 需求与能力取 min，再折算成到达率
     const usedSum=pP.used+dP.used, waste=(nP-pP.used)+(nD-dP.used);
     if(!best){ best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s}; continue; }
     const tie=Math.abs(l-best.l)<=1e-12;
@@ -463,10 +465,12 @@ function pdBestSplit(){
       const dP=dAt(m,g,hbm,pf,tps,S,W,nD,1e9,legal,bwH,A_GB);
       const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
       if(!dP||!pP||pP.supply<=0||dP.streams<=0) continue;
-      const l=Math.min(dP.eff*tps/nout, pP.supplyEff);
-      if(!fullBest||l>fullBest.l) fullBest={l,dP,pP};
+      const dwellL=nout/tps, facL=Math.max(1,dP.fac||1);
+      const capAllL=Math.min(Math.max(1,Math.floor(pP.supplyEff*dwellL)), Math.max(1,Math.floor(dP.capS*dP.k/facL)), Math.max(1,Math.floor(dP.memMax*dP.k/facL)));
+      const l=Math.min(pP.supplyEff, capAllL/dwellL);
+      if(!fullBest||l>fullBest.l) fullBest={l,dP,pP,capAllL};
     }
-    if(fullBest) LAST_CAP_FULL=Math.min(Math.floor(fullBest.pP.supplyEff*nout/tps), fullBest.dP.capS*fullBest.dP.k, fullBest.dP.memMax*fullBest.dP.k);
+    if(fullBest) LAST_CAP_FULL=fullBest.capAllL;
   }
   // —— 需求导向：若「刚好满足当前需求」所需的节点数少于总节点，就只分配这么多，其余显式闲置 ——
   {
@@ -483,7 +487,8 @@ function pdBestSplit(){
       }
       if(pMin){
         const T=pMin+dMin, pCap=Math.floor(pBest.supplyEff*nout/tps);
-        const capAll=Math.min(pCap, dBest.capS*dBest.k, dBest.memMax*dBest.k);
+        const facS=Math.max(1,dBest.fac||1);
+        const capAll=Math.min(Math.max(1,pCap), Math.max(1,Math.floor(dBest.capS*dBest.k/facS)), Math.max(1,Math.floor(dBest.memMax*dBest.k/facS)));
         if(T<=nodes && capAll>=C*0.99){
           best={nP:pMin,nD:dMin,l:Math.min(dBest.eff*tps/nout,pBest.supplyEff),used:T,usedSum:T,waste:0,
                 pEff:pBest.supplyEff,pInst:pBest.k,dInst:dBest.k,sP:pBest.s,sD:dBest.s};
@@ -492,7 +497,9 @@ function pdBestSplit(){
     }
   }
   { const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs);
-    if(st){ best.nP=st.nP; best.nD=st.nD; best.l=Math.min(st.dP.eff*tps/nout, st.pP.supplyEff); best.pInst=st.pP.k; best.dInst=st.dP.k; best.sP=st.pP.s; best.sD=st.dP.s; } }
+    if(st){ const dw=nout/tps, fc=Math.max(1,st.dP.fac||1);
+      const capA=Math.min(Math.max(1,Math.floor(st.pP.supplyEff*dw)), Math.max(1,Math.floor(st.dP.capS*st.dP.k/fc)), Math.max(1,Math.floor(st.dP.memMax*st.dP.k/fc)));
+      best.nP=st.nP; best.nD=st.nD; best.l=Math.min(st.pP.supplyEff, Math.min(C,capA)/dw); best.pInst=st.pP.k; best.dInst=st.dP.k; best.sP=st.pP.s; best.sD=st.dP.s; } }
   return {best,minD,minN};
 }
 // —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
@@ -640,9 +647,16 @@ function calc(){
       pdD = {nodes:nD, inst:dPl.k, gd:{nodes:dPl.s, grid:[dPl.g.tp,dPl.g.pp], rep:dPl.g.rep},
              capS:dPl.capS, memMax:dPl.memMax, fac:dPl.fac,
              streams:dPl.streams, streamsEff:dPl.eff, perInst:dPl.perInst,
-             inflD:Math.min(dPl.perInst, Math.floor(dPl.capS/dPl.fac), Math.max(0,dPl.memMax)), lD:dPl.eff*tps/nout};
+             inflD:Math.min(dPl.perInst, Math.floor(dPl.capS/dPl.fac), Math.max(0,dPl.memMax))};
       pdP.lPraw = pPl.supply; pdP.fac = pPl.fac;
-      lam = Math.min(pdD.lD, pPl.supplyEff);
+      { const dwell=nout/tps, facD=Math.max(1,dPl.fac||1);
+        pdD.capE=Math.max(1,Math.floor(dPl.k*Math.max(0,dPl.capS)/facD));   // D 有效流（形状代价已折算）
+        pdD.capM=Math.max(1,Math.floor(dPl.k*Math.max(0,dPl.memMax)/facD)); // D 显存可挂的有效流
+        pdD.capP=Math.max(1,Math.floor(pPl.supplyEff*dwell));               // P 池按到达率折算的在途条数
+        pdD.capAll=Math.min(pdD.capE,pdD.capM,pdD.capP);
+        pdD.effInfl=Math.min(infl,pdD.capAll);
+        pdD.lD=pdD.effInfl/dwell;
+        lam=Math.min(pdD.lD,pPl.supplyEff); }
       // 瓶颈归属：P 供给不足 → "P"；D 算力不足（没吃满需求并发）→ "D"；D 已吃满需求、λ 由需求封顶 → "需求"
       pdP.bott = (pPl.supply <= pdD.lD+1e-9) ? "P" : (dPl.streams < infl-1e-9 ? "D" : "需求");
     }
@@ -758,13 +772,12 @@ function calc(){
     $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
     $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（每 D 实例 有效并发 "+Math.round(pdD.streams/Math.max(1,pdD.inst))+" / 带宽上限 "+pdD.capS+" 流；每步读 激活权重 "+A_GB.toFixed(1)+" GB + 各流在驻 KV，单卡 "+bwH+" TB/s）";
     // 当前配比下「集群最多能挂多少在途请求」：P 池能喂多少 + D 池 decode/显存各能挂多少，取 min
-    const dDec=pdD.inst*Math.max(0,pdD.capS), dMem=pdD.inst*Math.max(0,pdD.memMax), pCap=Math.floor(pdP.lP*nout/tps);
-    pdD.capAll=Math.min(dDec,dMem,pCap); LAST_CAP=pdD.capAll;
-    pdD.capBnd=(pdD.capAll===pCap)?"P 池 prefill":((pdD.capAll===dDec)?"D 池带宽":"D 池显存");
+    const dDec=pdD.capE, dMem=pdD.capM, pCap=pdD.capP; LAST_CAP=pdD.capAll;
+    pdD.capBnd=(pdD.capAll===pCap)?"P 池 prefill":((pdD.capAll===dDec)?"D 池带宽（有效流）":"D 池显存（有效流）");
     $("inflhint").innerHTML = (infl>pdD.capAll)
       ? "需求参数：需求 "+infl+" 已超本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D 带宽 "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐"
-      : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D 带宽 "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）";
-    $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D 带宽 "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+Math.min(infl,pdD.capAll)+"）";
+      : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D 有效流 "+dDec+" ｜ D 显存 "+dMem+"；受限项 "+pdD.capBnd+"）";
+    $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D 有效流 "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+pdD.effInfl+"）";
     {const e2e=lam*Tsvc, pre=Math.max(0,e2e-pdD.capAll);
      $("d_svc").innerHTML = Tsvc.toFixed(2)+" s（同口径校验：到达率 λ "+lam.toFixed(2)+" req/s × 服务时长 = <b>"+e2e.toFixed(0)+" 条端到端在途</b> = decode 段 "+pdD.capAll+" + prefill 段 "+Math.round(pre)+"）";}
     $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
