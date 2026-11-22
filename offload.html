@@ -139,13 +139,27 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
         <div class="f" style="grid-column:1/-1"><label><b>TTFT 目标</b>（ms）</label><input id="ttft" type="number" value="500" step="50" min="1"><div class="hint" id="ctxhint"></div></div>
       </div>
       <h3>忙闲负荷（磨损用）</h3>
-      <div class="f2">
-        <div class="f"><label><b>忙时段</b>（起—止）</label>
-          <div style="display:flex;gap:5px;align-items:center"><input id="bstart" type="number" value="8" min="0" max="24" step="1" style="width:66px;text-align:center"><span style="color:var(--sub)">—</span><input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:66px;text-align:center"></div></div>
-        <div class="f"><label><b>忙 / 闲负荷</b>（%）</label>
-          <div style="display:flex;gap:5px;align-items:center"><input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:66px;text-align:center"><span style="color:var(--sub)">/</span><input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:66px;text-align:center"></div></div>
+      <div class="f" style="grid-column:1/-1">
+        <label><b>忙闲分时负荷</b>（% 峰值，用于磨损的 24h 加权）</label>
+        <div style="display:flex;flex-direction:column;gap:7px;font-size:13px;color:var(--sub)">
+          <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;flex-wrap:wrap">
+            <span style="color:var(--ink);font-weight:600">繁忙</span>
+            <input id="bstart" type="number" value="8" min="0" max="24" step="1" style="width:58px;padding:5px 6px;text-align:center">
+            <span>—</span>
+            <input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:58px;padding:5px 6px;text-align:center">
+            <span>时，负荷</span>
+            <input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:58px;padding:5px 6px;text-align:center">
+            <span>%</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;flex-wrap:wrap">
+            <span style="color:var(--ink);font-weight:600">闲时</span>
+            <span>（其余时段）负荷</span>
+            <input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:58px;padding:5px 6px;text-align:center">
+            <span>%</span>
+          </div>
+        </div>
+        <div class="hint" id="whint"></div>
       </div>
-      <div class="hint" id="whint"></div>
     </div>
 
     <div class="card"><h2>KV 缓存设备</h2>
@@ -574,7 +588,7 @@ function recalc(){
   const b=readBase(), m=b.m;
   const capTok=m.ctx||0;
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
-  $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量；窗口容量本身不受影响）";
+  $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
   const A=b.pd?evalScene(b,{store:false,devBW:0,devIOPS:0,blk:128},false):evalMixed(b,{store:false,devBW:0,devIOPS:0,blk:128},false);
