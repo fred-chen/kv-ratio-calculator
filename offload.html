@@ -71,7 +71,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 .f2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
 .f1{display:grid;grid-template-columns:1fr;gap:10px}
 .f label{font-size:12.5px}
-.f input,.f select{font-size:13.5px;padding:7px 9px}
+.f input,.f select{font-size:13.5px;padding:7px 9px;min-width:0}
 .res-card{position:relative;border-left:3px solid #d8dde6;padding:16px 18px}
 .res-card.b{border-left-color:#2f9e6f}
 .res-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
@@ -138,9 +138,9 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
       <h3>忙闲负荷（磨损用）</h3>
       <div class="f2">
         <div class="f"><label><b>忙时段</b>（起—止）</label>
-          <div style="display:flex;gap:5px;align-items:center"><input id="bstart" type="number" value="8" min="0" max="24" step="1" style="width:52px;text-align:center"><span style="color:var(--sub)">—</span><input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:52px;text-align:center"></div></div>
+          <div style="display:flex;gap:5px;align-items:center"><input id="bstart" type="number" value="8" min="0" max="24" step="1" style="width:66px;text-align:center"><span style="color:var(--sub)">—</span><input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:66px;text-align:center"></div></div>
         <div class="f"><label><b>忙 / 闲负荷</b>（%）</label>
-          <div style="display:flex;gap:5px;align-items:center"><input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:52px;text-align:center"><span style="color:var(--sub)">/</span><input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:52px;text-align:center"></div></div>
+          <div style="display:flex;gap:5px;align-items:center"><input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:66px;text-align:center"><span style="color:var(--sub)">/</span><input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:66px;text-align:center"></div></div>
       </div>
       <div class="hint" id="whint"></div>
     </div>
@@ -469,7 +469,7 @@ function recalc(){
   const b=readBase(), m=b.m;
   const capTok=m.ctx||0;
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
-  $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（只影响日均写入与寿命，不影响容量）";
+  $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量；窗口容量本身不受影响）";
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
   const A=evalScene(b,{store:false,devBW:0,devIOPS:0,blk:128},false);
