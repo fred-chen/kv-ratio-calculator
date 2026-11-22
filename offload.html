@@ -395,8 +395,11 @@ function evalScene(b,sc,withStore){
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
+  // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
+  const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
-          daily,withStore,use,svc:best.pP.tpfEff+dwell,ttftEff:best.pP.tpfEff*1000,
+          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,
+          daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
 
@@ -416,8 +419,8 @@ function outTable(res,withStore,note,scNote){
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
   rows.push(["推荐 P 池","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
   rows.push(["推荐 D 池","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；可服务 "+fmt(s.dSup)+" req/s）"]);
-  rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+(res.ttftEff).toFixed(0)+" ms + decode "+fmt(res.dwell,2)+" s）"]);
-  rows.push(["TTFT 校核",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
+  rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s）"]);
+  rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>':"0"]);
   rows.push([withStore?"未命中写入":"KV 产生速率",fmt(res.wrMiss)+" GB/s"]);
