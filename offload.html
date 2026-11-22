@@ -114,6 +114,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
       <div class="f2">
         <div class="f"><label><b>计算节点数</b></label><input id="nodes" type="number" value="128" min="1" step="1"></div>
         <div class="f"><label><b>每节点 GPU 数</b></label><input id="g" type="number" value="8" min="1" step="1"></div>
+        <div class="f" style="grid-column:1/-1"><div id="gpuhint" style="font-size:15px;font-weight:700;color:var(--ink)"></div></div>
         <div class="f" style="grid-column:1/-1"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint"></div></div>
         <div class="f"><label><b>单卡 HBM 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单卡 HBM 带宽</b>（TB/s）</label><input id="hbmbw" type="number" value="3.35" step="0.05" min="0.1"></div>
@@ -648,6 +649,8 @@ function recalc(){
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
+  const gTot=(b.nodes||0)*(b.g||0);
+  $("gpuhint").innerHTML="共 <span style=\"font-size:19px\">"+fmt(gTot,0)+"</span> 张 GPU（"+(b.nodes||0)+" 节点 × "+(b.g||0)+"）";
 
   $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（PD 需比混部高 ≥15% 才推荐）");
   let note="";
