@@ -113,7 +113,8 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
         <div class="f"><label><b>DWPD</b>（次/天）</label><input id="dwpd" type="number" value="1" step="0.1" min="0.01"></div>
         <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="3" step="1" min="0.5"></div>
         <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="window" type="number" value="2" step="0.5" min="0.01"></div>
-        <div class="f"><label><b>在驻 HBM 比例 κ</b>（%）</label><input id="kappa" type="number" value="50" step="5" min="1" max="100"><div class="hint">其余 KV 从存储设备每步回读</div></div>
+        <div class="f"><label><b>前缀缓存命中率 h</b>（%）</label><input id="hit" type="number" value="70" step="5" min="0" max="100"><div class="hint">命中 → 不再重算前缀，KV 直接从设备读回 HBM</div></div>
+        <div class="f"><label><b>命中前缀占上下文 r</b>（%）</label><input id="ratio" type="number" value="90" step="5" min="0" max="100"><div class="hint">可复用的前缀 token 占比</div></div>
         <div class="f"><label><b>块大小</b>（KB）</label><input id="blk" type="number" value="128" step="1" min="4"></div>
         <div class="f"><label><b>设备总 IOPS</b>（留空=不约束）</label><input id="iops" type="number" step="1000" min="0" placeholder="例如 3000000"></div>
       </div>
@@ -125,14 +126,15 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <section><div id="cmp" class="card"></div></section>
 <div class="card" style="margin-top:6px"><h2>口径与假设</h2>
 <ul class="chk-list" style="color:var(--sub);font-size:12.5px;line-height:1.7">
-<li><b>无存储（A）</b>：在途 KV 全部驻留 HBM（κ=100%），decode 每步从 HBM 读「激活权重 + 全部在途 KV」；不落盘，因此没有容量/寿命指标。</li>
-<li><b>有存储（B）</b>：只把 κ 比例的 KV 驻留 HBM，其余每步从设备回读；回读带宽需求 = (1−κ)×单请求 KV×每流 tps，设备总带宽 = 单设备带宽×台数，超过就成为新的受限项。</li>
-<li><b>容量</b> = 峰值写入（λ×S）× 保留窗口 × 1.2；<b>日均写入</b> = 峰值写入 × 86400 × 忙闲 24h 加权系数 w。</li>
+<li><b>无存储（A）</b>：每个请求的前缀<b>全部重算</b>（prefill = 整段上下文），在途 KV 常驻 HBM；不落盘，所以没有容量/寿命指标。</li>
+<li><b>有存储（B）</b>：前缀命中率 h、命中前缀占比 r，prefill 只需重算 <b>(1−h·r)</b> 的部分——这就是收益来源；命中前缀的 KV 从设备<b>一次性读回 HBM</b>（进 decode 后仍全量驻留 HBM，两场景 D 池一致）。</li>
+<li><b>设备带宽约束</b>：读回 = λ×h×r×S（GB/s）、未命中写入 = λ×(1−h)×r×S；设备总带宽 = 单设备带宽×台数，不够时 λ 直接受压。</li>
+<li><b>容量</b> = 前缀 KV 缓存量（λ×r×S×保留窗口×1.2，保守上限）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w。</li>
 <li><b>寿命</b> = DWPD × 容量 × 5 年 ÷ 日均写入（磨损保底容量会把推荐容量抬到满足期待寿命所需）。</li>
 <li>读写共用同一设备带宽池；块随机读；未建模元数据/EC 额外开销与回读延迟（延迟只影响可行性判断，不进 tok/s）。</li>
 <li>没有需求参数：两栏都是「固定总节点、最大化到达率」的搜索，输出的是客观服务能力上限。</li>
 </ul></div>
-<p class="hint" style="margin-top:10px">口径：无存储 = 在途 KV 全部驻留 HBM（κ=100%）；有存储 = 只驻留 κ，其余每步回读，受「单设备带宽 × 台数」与 IOPS 约束。两栏都以“最大化到达率”搜 P/D 配比，输出同一套服务能力指标；容量 = 峰值写入 × 保留窗口 × 1.2，寿命 = DWPD × 容量 × 5 年 ÷ 日均写入（忙闲加权）。</p>
+<p class="hint" style="margin-top:10px">口径：无存储 = 每个请求前缀全部重算（prefill 按整段上下文算），在途 KV 常驻 HBM；有存储 = 前缀命中率 h、命中占比 r，prefill 只重算 (1−h·r)，命中前缀的 KV 从设备一次性读回 HBM（decode 阶段两场景的 KV 都在 HBM，所以 D 池能力相同，收益全部来自少算 prefill）。容量 = 前缀 KV 缓存量（λ×r×S×窗口×1.2），寿命 = DWPD×容量×5 年÷未命中日写入。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -279,32 +281,38 @@ function readBase(){
 }
 
 /* ---------- 单场景：最大化 λ 的 P/D 划分 ---------- */
+/* sc = {store:bool, hit, ratio, devBW, devIOPS, blk} */
 function pickSplit(b,sc){
   const {m,g,hbm,bwH,pf,nodes,legal,dwell,S,W,A_GB,ttft,fl}=b;
+  const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,sc.hit*sc.ratio)):0;   // 有设备带宽才谈得上复用
+  const flEff=fl*(1-use);                                        // 有效 prefill 计算量
+  const readPerReq=use*S;                                        // 每请求从设备读回的 KV（GB）
   let best=null;
   for(let nD=1;nD<nodes;nD++){
     const nP=nodes-nD;
-    const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttft,W); if(!pP||pP.supply<=0) continue;
-    const dP=dAt(m,g,hbm,pf,b.tps,S,W,nD,1e9,legal,bwH,A_GB,sc.kappa); if(!dP||dP.capS<=0||dP.streams<=0||dP.memMax<=0) continue;
+    const pP=supplyAt(m,g,hbm,pf,flEff,nP,nodes,legal,ttft,W); if(!pP||pP.supply<=0) continue;
+    const dP=dAt(m,g,hbm,pf,b.tps,S,W,nD,1e9,legal,bwH,A_GB,1); if(!dP||dP.capS<=0||dP.streams<=0||dP.memMax<=0) continue;
     const fac=Math.max(1,dP.fac||1);
     const capE=Math.max(1,Math.floor(dP.k*dP.capS/fac));
     const capM=Math.max(1,Math.floor(dP.k*Math.max(0,dP.memMax)/fac));
     const capP=Math.max(1,Math.floor(pP.supplyEff*dwell));
     let capAll=Math.min(capE,capM,capP), bnd=(capAll===capP)?"P 池 prefill":(capAll===capE?"D 池带宽":"D 池显存");
-    if(sc.kappa<1 && sc.devBW>0){
-      const per=Math.max(1e-9,(1-sc.kappa)*S*b.tps);
-      const st=Math.floor(sc.devBW/per);
-      if(st<capAll){capAll=Math.max(0,st);bnd="存储带宽";}
+    let lam=Math.min(pP.supplyEff, capAll/dwell);
+    if(sc.store && use>0){
+      if(sc.devBW>0){
+        const bwCap=sc.devBW/Math.max(1e-9,readPerReq);          // 读回带宽允许的 req/s
+        if(bwCap<lam){ lam=bwCap; bnd="设备读带宽"; }
+        const wrRate=(1-use)*S, wrCap=sc.devBW/Math.max(1e-9,wrRate);
+        if(wrCap<lam){ lam=wrCap; bnd="设备写带宽"; }
+      } else { lam=0; bnd="无设备带宽"; }
+      if(sc.devIOPS>0){
+        const blocksPerReq=readPerReq*1e9/Math.max(4,sc.blk)/1024;
+        const ioCap=sc.devIOPS/Math.max(1e-9,blocksPerReq);
+        if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS"; }
+      }
     }
-    if(sc.kappa<1 && sc.devIOPS>0){
-      const blocks=Math.max(1e-9,((1-sc.kappa)*S*1e9)/(Math.max(4,sc.blk)*1024));
-      const io=Math.floor(sc.devIOPS/(blocks*b.tps));
-      if(io<capAll){capAll=Math.max(0,io);bnd="存储 IOPS";}
-    }
-    if(capAll<=0) continue;
-    const lam=Math.min(pP.supplyEff,capAll/dwell);
     if(!(lam>0)) continue;
-    const cand={nP:pP.used,nD:dP.used,lam,capAll,bnd,pP,dP,capE,capM,capP};
+    const cand={nP:pP.used,nD:dP.used,lam,capAll:Math.max(1,Math.floor(lam*dwell)),bnd,pP,dP,capE,capM,capP,use,readPerReq,flEff};
     if(!best||cand.lam>best.lam+1e-12||(Math.abs(cand.lam-best.lam)<=1e-12&&cand.capAll>best.capAll)) best=cand;
   }
   return best;
@@ -313,19 +321,22 @@ function pickSplit(b,sc){
 function evalScene(b,sc,withStore){
   const best=pickSplit(b,sc);
   if(!best) return {ok:false};
-  const lam=best.lam, capAll=best.capAll, dwell=b.dwell, wr=lam*b.S;
+  const lam=best.lam, capAll=best.capAll, dwell=b.dwell, S=b.S;
   const win=Math.max(0.01,+$("window").value||2), dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
-  const capdev=Math.max(0.1,+$("capdev").value||32), devsIn=Math.max(0,Math.round(+$("devs").value||0));
-  const daily=wr*86400*b.w, cap=wr*win*3600*RED, wcap=elife*daily/(dwpd*DWPD_YEARS);
-  const capFinal=Math.max(cap,wcap), lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
+  const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0));
+  const ratio=sc.store?sc.ratio:0, hit=sc.store?sc.hit:0;
+  const wrRead=lam*best.use*S;                                   // 设备读回 GB/s
+  const wrMiss=lam*(1-best.use)*S;                               // 未命中前缀写入 GB/s
+  const cacheCap=withStore?(lam*ratio*S*win*3600*RED):0;         // 前缀 KV 缓存量（保守）
+  const daily=(withStore?wrMiss:lam*S)*86400*b.w;
+  const wcap=elife*daily/(dwpd*DWPD_YEARS);
+  const capFinal=Math.max(cacheCap,wcap);
+  const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
-  const perStreamRead=(1-sc.kappa)*b.S*b.tps;
-  const blocksPerStream=((1-sc.kappa)*b.S*1e9)/(Math.max(4,sc.blk||128)*1024);
-  const iopsNeed=(sc.kappa<1)?(capAll*blocksPerStream*b.tps):0;
-  return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wr,daily,cap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
-          rd:wr*RAMPL,perStreamRead,iopsNeed,withStore,kappa:sc.kappa,svc:best.pP.tpfEff+dwell,ttftEff:best.pP.tpfEff*1000,
-          win,dwpd,elife};
+  return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
+          daily,withStore,hit,ratio,use:best.use,svc:best.pP.tpfEff+dwell,ttftEff:best.pP.tpfEff*1000,
+          win,dwpd,elife,readPerReq:best.readPerReq};
 }
 
 /* ---------- 渲染 ---------- */
@@ -343,27 +354,26 @@ function outTable(res,withStore,note,scNote){
   rows.push(["单请求服务时长",fmt(res.svc,2)+" s（prefill "+(res.ttftEff).toFixed(0)+" ms + decode "+fmt(res.dwell,2)+" s）"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>':"0"]);
-  rows.push(["峰值写入带宽",fmt(res.wr)+" GB/s"]);
+  rows.push([withStore?"未命中前缀写入":"KV 产生速率（若落盘）",fmt(res.wrMiss)+" GB/s"]);
   rows.push(["日均写入（忙闲加权）",fmt(res.daily)+" GB/天"]);
   const ttftOver=res.ttftEff>Math.max(1,+$("ttft").value||500);
   rows.push(["TTFT 校核",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+' ms '+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   if(withStore){
-    rows.push(["κ（实际）",(res.kappa*100).toFixed(0)+"%"]);
-    const devPerStream=res.totBW>0?(res.perStreamRead*res.devsIn/res.totBW):0;
-    rows.push(["每流回读需求",fmt(res.perStreamRead)+" GB/s"+(res.kappa>=1?"（无回读）":"")]);
-    rows.push(["容量需求（窗口 "+fmt(res.win,2)+"h ×1.2）",fmt(res.capFinal)+" GB（含磨损保底 "+fmt(res.wcap)+" GB）"]);
+    rows.push(["前缀命中（h×r）",(100*res.use).toFixed(1)+"%（重算比例 "+(100*(1-res.use)).toFixed(1)+"%）"]);
+    rows.push(["命中前缀读回/请求",fmt(res.readPerReq)+" GB"]);
+    rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 设备总带宽":"无设备")+"）"]);
+    rows.push(["未命中写入带宽",fmt(res.wrMiss)+" GB/s"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+' 台，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
+    rows.push(["容量（前缀缓存 "+fmt(res.win,2)+"h ×1.2）",fmt(res.cacheCap)+" GB（磨损保底 "+fmt(res.wcap)+" GB）"]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
-    rows.push(["单流占用的设备",res.kappa>=1?"–":(devPerStream>0?fmt(devPerStream,2)+" 台/流（≈"+(1/devPerStream).toFixed(1)+" 流/台）":"–")]);
-    rows.push(["设备写带宽占用",fmt(res.wr)+" / "+fmt(res.totBW)+" GB/s（"+(res.totBW>0?(100*res.wr/res.totBW).toFixed(0):"–")+"%）"]);
-    rows.push(["设备读带宽占用",fmt(res.rd)+" / "+fmt(res.totBW)+" GB/s（"+(res.totBW>0?(100*res.rd/res.totBW).toFixed(0):"–")+"%）"]);
     const io=Math.max(0,+$("iops").value||0);
-    rows.push(["IOPS 占用",io>0?(fmt(res.iopsNeed)+" / "+fmt(io)+"（"+(100*res.iopsNeed/io).toFixed(0)+"%）"):"未填 IOPS（不约束）"]);
+    const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/Math.max(4,+$("blk").value||128)/1024):0;
+    rows.push(["IOPS 占用",io>0?(fmt(ioNeed)+" / "+fmt(io)+"（"+(ioNeed>0?(100*ioNeed/io).toFixed(0)+"%":"–")+"）"):"未填 IOPS（不约束）"]);
   }
   let h='<h2>'+title+'</h2>';
   if(note) h+='<p class="hint'+(scNote?" bad":"")+'" style="margin:4px 0 6px">'+note+'</p>';
   h+='<table class="out-tb">'+rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join("")+'</table>';
-  if(!withStore) h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；表中写入与日均写入是“若必须落盘时需要接住的量”。</p>';
+  if(!withStore) h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；「KV 写入」是若必须落盘时需要接住的量。</p>';
   return h;
 }
 
@@ -371,20 +381,21 @@ function compare(A,B,note){
   const box=$("cmp");
   if(!A.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
   const dλ=A.lam>0?100*(B.lam/A.lam-1):NaN, dC=A.capAll>0?100*(B.capAll/A.capAll-1):NaN, dT=A.tokps>0?100*(B.tokps/A.tokps-1):NaN;
-  const line=(lbl,a,b,d,suf)=>'<tr><td>'+lbl+'</td><td>'+a+'</td><td>'+b+'</td><td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+(Number.isFinite(d)?(d>=0?"+":"")+d.toFixed(1)+"%":"–")+(suf||"")+'</td></tr>';
+  const line=(lbl,a,b,d)=>'<tr><td>'+lbl+'</td><td>'+a+'</td><td>'+b+'</td><td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+(Number.isFinite(d)?(d>=0?"+":"")+d.toFixed(1)+"%":"–")+'</td></tr>';
   const aB=A.best.bnd, bB=B.best.bnd;
   let conclude;
-  if(note&&/自动上调|无可用/.test(note)) conclude="设备带宽不足，已把 κ 自动抬到可行值：卸载<b>不增加</b>服务能力，B 与 A 基本相同。";
-  else if(dλ>1) conclude="卸载带来正向收益：到达率 +"+dλ.toFixed(1)+"%、并发 "+(dC>=0?"+":"")+dC.toFixed(1)+"%。这里的 A 被「"+aB+"」卡住，而设备带宽足以支撑更多在途。";
-  else if(dλ<-1) conclude="卸载后服务能力<b>反而下降</b> "+(-dλ).toFixed(1)+"%：A 的瓶颈是「"+aB+"」（还没被 D 池限制），B 却新增了「"+bB+"」这条约束——设备带宽/IOPS 喂不住 decode 每步回读的 KV。";
-  else conclude="两种部署的 λ 基本相同：瓶颈在「"+aB+"」，不在 D 池/存储，卸载不改变吞吐；它的价值在容量、保留窗口与前缀复用，而不是提高并发。";
-  box.innerHTML='<h2>收益对比（无存储 → 有存储）</h2>'+
-   '<table class="cmp-tb"><tr><th>指标</th><th>无 KV 存储（A）</th><th>有 KV 存储（B）</th><th>差异</th></tr>'+
+  if(note&&/无设备|命中率 0/.test(note)) conclude="没有可用的前缀缓存（命中率 0 或设备带宽为 0）：B 退化为与 A 相同，收益为 0。";
+  else if(dλ>1) conclude="KV 缓存带来正向收益：到达率 +"+dλ.toFixed(1)+"%、并发 "+(dC>=0?"+":"")+dC.toFixed(1)+"%。省掉的重算 = h×r = "+(100*B.use).toFixed(1)+"% 的 prefill；瓶颈从「"+aB+"」变为「"+bB+"」。";
+  else if(Math.abs(dλ)<=1) conclude="两者到达率基本相同：瓶颈在「"+aB+"」，即便省掉 "+(100*B.use).toFixed(1)+"% 的 prefill 也不能再提高 λ；此时 KV 缓存的价值只在降低 TTFT、减少算力占用与容量复用。";
+  else conclude="KV 缓存反而更差（"+dλ.toFixed(1)+"%）：设备读回带宽/IOPS 已成为新瓶颈（"+bB+"），原本「"+aB+"」的瓶颈被换掉了。";
+  box.innerHTML='<h2>收益对比（前缀重算 → 前缀命中）</h2>'+
+   '<table class="cmp-tb"><tr><th>指标</th><th>无 KV 缓存（A：全量重算）</th><th>有 KV 缓存（B：命中不重算）</th><th>差异</th></tr>'+
    line("到达率 λ（req/s）",fmt(A.lam),fmt(B.lam),dλ)+
    line("并发上限（条）",fmt(A.capAll),fmt(B.capAll),dC)+
    line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
    '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>'+
-   '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+fmt(B.capFinal)+' GB · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
+   '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
+   '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+fmt(B.cacheCap)+' GB · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
    '</table><p class="hint" style="margin-top:8px">'+conclude+'</p>';
 }
 
@@ -395,14 +406,13 @@ function recalc(){
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（只影响日均写入与寿命，不影响容量）";
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
-  const A=evalScene(b,{kappa:1,devBW:0,devIOPS:0,blk:128},false);
-  let k=Math.min(1,Math.max(0.01,(+$("kappa").value||50)/100)), note="";
+  const A=evalScene(b,{store:false,hit:0,ratio:0,devBW:0,devIOPS:0,blk:128},false);
+  const hit=Math.min(1,Math.max(0,(+$("hit").value||0)/100)), ratio=Math.min(1,Math.max(0,(+$("ratio").value||0)/100));
   const blk=Math.max(4,+$("blk").value||128), iops=Math.max(0,+$("iops").value||0), tot=bwdev*devsIn;
-  if(k<1&&tot>0){
-    const per=(1-k)*b.S*b.tps;
-    if(per>tot){ const kmin=1-tot/(b.S*b.tps); k=Math.max(k,Math.min(1,kmin)); note="设备带宽不足：按 κ="+(100*k).toFixed(0)+"% 计算（已自动上调，卸载收益被压缩）"; }
-  } else if(k<1&&tot===0){ k=1; note="没有可用设备带宽 → 等价于无存储（κ=100%）"; }
-  const B=evalScene(b,{kappa:k,devBW:tot,devIOPS:iops,blk},true);
+  let note="";
+  if((hit*ratio)<=0) note="命中率×前缀占比为 0：不会省任何 prefill，B 与 A 相同。";
+  else if(tot<=0) note="没有可用设备带宽：无法读回命中前缀，B 与 A 相同（收益 0）。";
+  const B=evalScene(b,{store:true,hit,ratio,devBW:tot,devIOPS:iops,blk},true);
   $("a_out").innerHTML=outTable(A,false,"");
   $("b_out").innerHTML=outTable(B,true,note,!!note);
   compare(A,B,note);
