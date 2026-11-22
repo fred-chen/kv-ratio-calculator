@@ -127,8 +127,6 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
           <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16</option><option value="1">FP8</option></select></div>
         </div>
       </div>
-      <label class="chk"><input type="checkbox" id="pd" checked> <b>PD 分离部署</b><span>不勾选＝混部：同一实例同时做 prefill 与 decode</span></label>
-      <div class="hint" id="pdhint"></div>
       <h3>负载（典型场景）</h3>
       <div class="f1" style="margin-bottom:10px">
         <div class="f"><label><b>场景预设</b></label><select id="scen"></select><div class="hint" id="scenhint"></div></div>
@@ -353,7 +351,7 @@ function readBase(){
   const W=m.W*bw, A_GB=m.P*bw, legal=legalList(m,g,nodes), dwell=nout/tps;
   const bs=+$("bstart").value||0, be=+$("bend").value||0, bl=+$("bload").value||0, il=+$("iload").value||0;
   const busyH=Math.max(0,Math.min(24,be-bs)), w=(busyH*(bl/100)+(24-busyH)*(il/100))/24;
-  const pd=!!$("pd").checked;
+  const pd=true;   // 固定按 PD 分离计算
   const use=prefix>0?Math.min(1,hist/prefix):0;                        // 历史前缀占比 = 命中率
   return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,pd};
 }
@@ -414,7 +412,10 @@ function pickSplit(b,sc){
 }
 
 
-/* ---------- 混部（非 PD）：单实例同时做 prefill + decode ---------- */
+
+const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s）
+
+/* ---------- 混部（节点不足以拆分 P/D 池时回退） ---------- */
 function evalMixed(b,sc,withStore){
   const {m,g,hbm,pf,nodes,legal,dwell,nout,S,S_pfx,W,bwH,ttft,fl}=b;
   const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0;
@@ -425,41 +426,22 @@ function evalMixed(b,sc,withStore){
   for(const it of legal){ if(it.s>nodes) break;
     const s=it.s, k=Math.floor(nodes/s); if(!k||W> s*g*hbm*UTIL) continue;
     const g0=it.g0, cards=s*g, used=k*s, fac=shapeFactor(g0.tp,g0.pp,g);
-    const ttftMs=flEff*fac/(cards*pf*MFU*1e15)*1000;                  // 每请求 prefill 时长
-    const lamFlops=used*g*pf*MFU*1e15/Math.max(1e-9,flEff*fac+decFL);  // 算力：prefill + decode
+    const ttftMs=flEff*fac/(cards*pf*MFU*1e15)*1000;
+    const lamFlops=used*g*pf*MFU*1e15/Math.max(1e-9,flEff*fac+decFL);
     const perMem=Math.floor((cards*hbm*UTIL - W)/(g0.rep*Math.max(1e-9,S)+1e-9));
     const perBw=decStreamsCap(cards, b.A_GB, g0.rep, S, b.tps, bwH, 1);
     const perSt=Math.max(0,Math.min(perMem,perBw)), streams=perSt*k;
     let lam=Math.min(lamFlops, streams/fac/dwell), bnd=lam===lamFlops?"算力（prefill+decode）":(perMem<=perBw?"HBM 显存":"HBM 带宽");
+    const lamRaw=lam;
     if(sc.store&&use>0){
-      let capB=bnd;
-      if(sc.devBW>0){
-        const bwCap=sc.devBW/Math.max(1e-9,readPerReq);
-        if(bwCap<lam){ lam=bwCap; capB="设备读带宽"; }
-        const wrCap=sc.devBW/Math.max(1e-9,(1-use)*S_pfx);
-        if(wrCap<lam){ lam=wrCap; capB="设备写带宽"; }
-      } else { lam=0; capB="无设备带宽"; }
-      if(sc.devIOPS>0){
-        const blocks=readPerReq*1e9/128/1024, ioCap=sc.devIOPS/Math.max(1e-9,blocks);
-        if(ioCap<lam){ lam=ioCap; capB="设备 IOPS"; }
-      }
-      bnd=capB;
+      if(sc.devBW>0){ const bwCap=sc.devBW/Math.max(1e-9,readPerReq); if(bwCap<lam){ lam=bwCap; bnd="设备读带宽"; } }
+      else { lam=0; bnd="无设备带宽"; }
+      if(sc.devIOPS>0){ const blocks=readPerReq*1e9/128/1024, ioCap=sc.devIOPS/Math.max(1e-9,blocks); if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS"; } }
     }
     if(!(lam>0)) continue;
-    const lamRaw=lam;                                              // 不承诺 ITL 时的吞吐上限
-    const C=used*g*pf*MFU*1e15;                                    // 集群可用算力 FLOP/s
-    const Bw=used*g*bwH*1000;                                      // 集群可用 HBM 带宽 GB/s
-    const prefillFL=flEff*fac;                                     // 每请求 prefill 算力
-    const prefillBW=W+(1-use)*S_pfx;                               // 每请求 prefill 的 HBM 流量（读权重 + 写 KV）GB
-    const lamC=prefillFL>0?C*SLO_TOL/prefillFL:Infinity;           // 算力份额 ≤ tol
-    const lamB=prefillBW>0?Bw*SLO_TOL/prefillBW:Infinity;          // 带宽份额 ≤ tol
-    const lamSlo=Math.min(lamC,lamB);
-    if(lamSlo<lam){ lam=lamSlo; bnd=lamB<lamC?"SLO（HBM 带宽争用）":"SLO（算力争用）"; }
-    const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
-                capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
+    const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
-    if(!best||okT>best.okT||(okT===best.okT&&(lam>best.lam+1e-9||(Math.abs(lam-best.lam)<=1e-9&&
-       (cand.util>best.util+1e-9||(Math.abs(cand.util-best.util)<=1e-9&&cand.idle<best.idle)))))) best=Object.assign({okT},cand);
+    if(!best||okT>best.okT||(okT===best.okT&&(lam>best.lam+1e-9||(Math.abs(lam-best.lam)<=1e-9&&cand.idle<best.idle)))) best=Object.assign({okT},cand);
   }
   if(!best) return {ok:false,pd:false};
   const lam=best.lam, outKV=nout*b.sTok, perReqWrite=(1-use)*S_pfx+outKV;
@@ -474,17 +456,14 @@ function evalMixed(b,sc,withStore){
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
-  const duty=lam>0?Math.min(1,lam*flEff*best.fac/(best.used*g*pf*MFU*1e15)):0;
-  const shareC=Math.max(0,1-lam*flEff*best.fac/Math.max(1e-9,(best.used*g*pf*MFU*1e15)));
-  const shareB=Math.max(0,1-lam*(b.W+(1-use)*b.S_pfx)/Math.max(1e-9,(best.used*g*bwH*1000)));
-  const share=Math.min(shareC,shareB);
-  const speed=b.tps*share;
-  const itlMs=speed>0?1000/speed:Infinity, goodput=lam*share;
-  return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw!=null?best.lamRaw:lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,duty,speed,itlMs,goodput,
-          wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
-          prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
-          svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
-          dwpd,elife,readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
+  const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
+  const speed=b.tps*(1-duty);
+  return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
+    duty,speed,itlMs:speed>0?1000/speed:Infinity,
+    wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
+    prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
+    svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
+    dwpd,elife,readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
 
 function evalScene(b,sc,withStore){
@@ -524,9 +503,9 @@ function outTable(res,withStore,note,scNote){
   const sub=withStore?"前缀命中不重算":"前缀全部重算";
   if(!res.ok) return '<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span></div><p class="bad" style="font-weight:700;margin-top:8px">当前规格无法部署：权重装不下，或没有合法 TP×PP 组合。</p>';
   const s=res.best;
-  const pG=res.pd===false?"":('TP'+s.pP.g.tp+'×PP'+s.pP.g.pp), dG=res.pd===false?"":('TP'+s.dP.g.tp+'×PP'+s.dP.g.pp);
-  const idleNum=res.pd===false? Math.max(0,Math.round(+$("nodes").value||0)-res.inst.used) : Math.max(0,Math.round(+$("nodes").value||0)-s.nP-s.nD);
-  const idle=idleNum;
+  const s2=s;
+  const pG=res.pd===false?"":('TP'+s2.pP.g.tp+'×PP'+s2.pP.g.pp), dG=res.pd===false?"":('TP'+s2.dP.g.tp+'×PP'+s2.dP.g.pp);
+  const idle=res.pd===false?Math.max(0,Math.round(+$("nodes").value||0)-s2.used):Math.max(0,Math.round(+$("nodes").value||0)-s2.nP-s2.nD);
   const ttftOver=res.ttftEff>Math.max(1,+$("ttft").value||500);
   const kpi='<div class="kpis">'+
     '<div><b>'+fmt(res.lam)+'</b><span>到达率 λ · req/s</span></div>'+
@@ -546,19 +525,18 @@ function outTable(res,withStore,note,scNote){
           '<span class="sub">要求 ≥ '+fmt(res.elife,1)+' 年 ｜ DWPD×现有容量×5 年÷日写入</span></div>'+
         '<div><b>'+fmt(res.totBW)+'</b><span>现有带宽 GB/s '+ok(res.bwOK)+'</span>'+
           '<span class="sub">需求 '+fmt(bw)+'（需 '+bwDevs+' 台）｜ 占用 '+(usePct).toFixed(0)+'%</span></div></div>';
-    })():'');;
+    })():'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
   if(res.pd===false){
     const I=res.inst, gG='TP'+I.g.tp+'×PP'+I.g.pp;
     rows.push(["推荐实例组合","每实例 "+I.s+" 节点 × "+I.k+" 个实例（共 "+I.used+" 节点；"+gG+"；每实例 "+I.perSt+" 条并发）"]);
     rows.push(["算力利用率",(100*I.util).toFixed(1)+"%（prefill + decode 合计占用；"+(I.util>=0.9?'<span class="good">接近饱和</span>':'<span class="hint">有余量</span>')+"）"]);
+    rows.push(["混部说明","节点不足以拆分 P/D 池，按单实例同时做 prefill 与 decode 计算"]);
   } else {
-  rows.push(["推荐 P 池（吞）","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
-  rows.push(["推荐 D 池（吐）","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s.dSup)+" req/s）"]);
+  rows.push(["推荐 P 池（吞）","P "+s2.nP+" 节点（"+s2.pP.k+" × "+s2.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s2.pP.supplyEff)+" req/s）"]);
+  rows.push(["推荐 D 池（吐）","D "+s2.nD+" 节点（"+s2.dP.k+" × "+s2.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s2.dSup)+" req/s）"]);
   }
-  if(res.pd===false) rows.push(["混部说明","按「算力合计（prefill+decode）」与 HBM 显存/带宽取小；并按 ITL 约束限制前缀算力占比 ≤ "+fmt(100*SLO_TOL,0)+"%，保证单流速度不低于目标的 "+(100*(1-SLO_TOL)).toFixed(0)+"%"]);
-  if(res.pd===false&&res.lamRaw>res.lam*1.01) rows.push(["吞吐上限（不承诺 ITL）","λ_max ≈ "+fmt(res.lamRaw,1)+" req/s ｜ 此时前缀算力占比接近 100%，单流速度会掉到几 tok/s"]);
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
       ? ("≈ "+fmt(res.itlMs,1)+" ms（约 "+fmt(1000/res.itlMs,1)+" tok/s；前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=tgt/(1-SLO_TOL)+0.05?' <span class="good">✓ 达标</span>':' <span class="bad">✗ 超标</span>'))
@@ -613,51 +591,37 @@ function compare(A,B,note){
    line("到达率 λ（req/s）",fmt(A.lam),fmt(B.lam),dλ)+
    line("并发上限（条）",fmt(A.capAll),fmt(B.capAll),dC)+
    line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
-   (A.pd===false||B.pd===false
-     ? '<tr><td>实例组合（混部）</td><td>'+A.inst.s+" 节点 × "+A.inst.k+'</td><td>'+B.inst.s+" 节点 × "+B.inst.k+'</td><td>'+(B.inst.s-A.inst.s)+" 节点 / "+(B.inst.k-A.inst.k)+' 实例</td></tr>'
-     : '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>')+
+   '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>'+
    '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
    '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
    '</table><div class="note-box">'+conclude+'</div>';
 }
 
 /* ---------- 主流程 ---------- */
-let LAST_A=null, LAST_B=null, PD_AUTO=true, PD_MANUAL=false, LAST_SIG="";
-const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s），由 decode 目标隐含，不新增输入
-const PD_EDGE=1.0;    // 不考虑工程复杂度：谁的服务水平高就选谁
+let LAST_A=null, LAST_B=null;
+
+/* ---------- 主流程 ---------- */
 function recalc(){
   const b0=readBase();
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
   const blk=128, iops=Math.max(0,+$("iops").value||0), tot=bwdev*devsIn;
-  const sig=[b0.nodes,b0.g,$("gpu").value,b0.hbm,b0.bwH,b0.pf,$("model").value,$("bw").value,$("bk").value,
-             b0.hist,b0.fresh,b0.nout,b0.tps,b0.ttft,b0.busyH,$("bload").value,$("iload").value,
-             $("bwdev").value,$("devs").value,$("capdev").value,$("dwpd").value,$("elife").value,$("iops").value].join("|");
-  if(sig!==LAST_SIG){ LAST_SIG=sig; PD_MANUAL=false; }          // 参数变化 → 重新自动挑选部署形态
-  if(PD_AUTO && !PD_MANUAL){
-    const score=pd=>{
-      const bb=Object.assign({},b0,{pd});
-      const B=pd?evalScene(bb,{store:true,devBW:tot,devIOPS:iops,blk},true):evalMixed(bb,{store:true,devBW:tot,devIOPS:iops,blk},true);
-      if(B&&B.ok) return B.lam;
-      const A=pd?evalScene(bb,{store:false,devBW:0,devIOPS:0,blk},false):evalMixed(bb,{store:false,devBW:0,devIOPS:0,blk},false);
-      return A&&A.ok?A.lam:0;
-    };
-    const want=score(true)>=score(false)*PD_EDGE;                 // PD 需领先 ≥15% 才推荐
-    if($("pd").checked!==want){ PD_SILENT=true; $("pd").checked=want; PD_SILENT=false; }
-  }
-  const b=Object.assign({},b0,{pd:!!$("pd").checked});
+  const b=Object.assign({},b0,{pd:true});
   const capTok=b.m.ctx||0;
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
   const gTot=(b.nodes||0)*(b.g||0);
   $("gpuhint").innerHTML="共 <span style=\"font-size:19px\">"+fmt(gTot,0)+"</span> 张 GPU（"+(b.nodes||0)+" 节点 × "+(b.g||0)+"）";
-
-  $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（PD 需比混部高 ≥15% 才推荐）");
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
-  const A=b.pd?evalScene(b,{store:false,devBW:0,devIOPS:0,blk},false):evalMixed(b,{store:false,devBW:0,devIOPS:0,blk},false);
-  const B=b.pd?evalScene(b,{store:true,devBW:tot,devIOPS:iops,blk},true):evalMixed(b,{store:true,devBW:tot,devIOPS:iops,blk},true);
+  let A=null, B=null, pdOK=b.nodes>=2;
+  if(pdOK){ A=evalScene(b,{store:false,devBW:0,devIOPS:0,blk},false); B=evalScene(b,{store:true,devBW:tot,devIOPS:iops,blk},true); if(!A.ok||!B.ok) pdOK=false; }
+  if(!pdOK){                                                    // 节点不足以拆分 P/D 池 → 回退混部
+    note="节点数不足以拆分 P/D 池（需 ≥2 节点），已按混部实例计算。容量/寿命口径不变。";
+    A=evalMixed(b,{store:false,devBW:0,devIOPS:0,blk},false);
+    B=evalMixed(b,{store:true,devBW:tot,devIOPS:iops,blk},true);
+  }
   LAST_A=A; LAST_B=B;
   $("a_out").innerHTML=outTable(A,false,"");
   $("b_out").innerHTML=outTable(B,true,note,!!note);
@@ -694,8 +658,7 @@ $("model").addEventListener("change",()=>{modelSync();recalc();});
 $("bw").addEventListener("change",()=>{pfSync();recalc();});
 $("bk").addEventListener("change",recalc);
 $("scen").addEventListener("change",()=>{applyPreset();recalc();});
-let PD_SILENT=false;
-$("pd").addEventListener("change",()=>{ if(!PD_SILENT) PD_MANUAL=true; recalc(); });
+
 document.querySelectorAll("input").forEach(e=>e.addEventListener("input",recalc));
 recalc();
 
