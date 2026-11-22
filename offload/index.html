@@ -447,7 +447,7 @@ function evalMixed(b,sc,withStore){
     if(!(lam>0)) continue;
     const lamRaw=lam;                                              // 不承诺 ITL 时的吞吐上限
     const totalCompute=used*g*pf*MFU*1e15, prefillSec=flEff*fac;
-    const lamSlo=prefillSec>0?totalCompute*SLO_TOL/prefillSec:Infinity;
+    const lamSlo=prefillSec>0?totalCompute*(SLO_TOL/SLO_ALPHA)/prefillSec:Infinity;   // duty ≤ 50%
     if(lamSlo<lam){ lam=lamSlo; bnd="SLO（ITL 抖动）"; }
     const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
                 capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
@@ -615,7 +615,8 @@ function compare(A,B,note){
 /* ---------- 主流程 ---------- */
 let LAST_A=null, LAST_B=null, PD_AUTO=true, PD_MANUAL=false, LAST_SIG="";
 const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s），由 decode 目标隐含，不新增输入
-const SLO_ALPHA=1.0;  // 前缀算力占比 duty 与 decode 可用算力 (1-duty) 自洽：decode 速度 = tps×(1-duty)
+const SLO_ALPHA=0.2;  // prefill 与 decode 可部分重叠：速度损失 ≈ 20% × 前缀算力占比（不是全串行）
+const PD_EDGE=1.15;   // PD 需明显更优（容量 ≥ +15%）才推荐，否则选更易运维的混部
 function recalc(){
   const b0=readBase();
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
@@ -632,7 +633,7 @@ function recalc(){
       const A=pd?evalScene(bb,{store:false,devBW:0,devIOPS:0,blk},false):evalMixed(bb,{store:false,devBW:0,devIOPS:0,blk},false);
       return A&&A.ok?A.lam:0;
     };
-    const want=score(true)>=score(false);                        // 平手取 PD
+    const want=score(true)>=score(false)*PD_EDGE;                 // PD 需领先 ≥15% 才推荐
     if($("pd").checked!==want){ PD_SILENT=true; $("pd").checked=want; PD_SILENT=false; }
   }
   const b=Object.assign({},b0,{pd:!!$("pd").checked});
@@ -641,7 +642,7 @@ function recalc(){
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
 
-  $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（目标：整集群 λ 最大）");
+  $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（PD 需比混部高 ≥15% 才推荐）");
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
