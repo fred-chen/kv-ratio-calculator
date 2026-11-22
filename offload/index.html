@@ -156,11 +156,9 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
         <div class="f"><label><b>单台容量</b>（TB）</label><input id="capdev" type="number" value="384" step="1" min="0.1"></div>
         <div class="f"><label><b>DWPD</b>（次/天）</label><input id="dwpd" type="number" value="1" step="0.1" min="0.01"></div>
         <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="3" step="1" min="0.5"></div>
-        <div class="f"><label><b>保留窗口</b>（小时）</label><input id="window" type="number" value="2" step="0.5" min="0.01"></div>
-        <div class="f"><label><b>块大小</b>（KB）</label><input id="blk" type="number" value="128" step="1" min="4"></div>
         <div class="f"><label><b>总 IOPS</b>（选填）</label><input id="iops" type="number" step="1000" min="0" placeholder="留空=不约束"></div>
       </div>
-      <p class="hintline">命中率由「历史前缀 ÷（历史前缀+新增前缀）」直接得出；命中前缀只从设备<b>读回一次</b>，带宽压力远小于“每步回读”。</p>
+      <p class="hintline">命中率由「历史前缀 ÷（历史前缀+新增前缀）」直接得出；命中前缀只从设备<b>读回一次</b>。KV 块大小固定按 <b>128 KB</b> 估算 IOPS；<b>保留窗口不再输入</b>：容量需求由期望寿命 + DWPD 反推，实际保留窗口 = 现有容量 ÷ 写入速率，显示在结果区。</p>
     </div>
   </aside>
 
@@ -176,7 +174,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 <li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
 <li><b>有存储（B）</b>：前缀命中率 h、命中占比 r，prefill 只重算 <b>(1−h·r)</b>；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
 <li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = max（写入速率 × 保留窗口 × 1.2，按期待寿命与 DWPD 反推的磨损保底容量）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
-<li>「保留窗口」始终按左侧输入（默认 2h），<b>不随场景预设变化</b>；预设给出的“建议 KV 保留 X 天”只是提示，可自行改窗口。</li>
+<li><b>保留窗口是派生值</b>（现有容量 ÷ 写入速率），不作为输入；容量需求由「期待寿命 + DWPD + 日均写入」反推。预设里的“建议 KV 保留 X 天”只是提示。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数）；块随机读；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></div>
@@ -390,7 +388,7 @@ function evalMixed(b,sc,withStore){
   const {m,g,hbm,pf,nodes,legal,dwell,nout,S,S_pfx,W,bwH,ttft,fl}=b;
   const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0;
   const flEff=fl*(1-use), readPerReq=use*S_pfx, decFL=2*m.P*1e9*nout;
-  const win=Math.max(0.01,+$("window").value||2), dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
+  const dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
   const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0)), totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   let best=null;
   for(const it of legal){ if(it.s>nodes) break;
@@ -425,56 +423,52 @@ function evalMixed(b,sc,withStore){
   if(!best) return {ok:false,pd:false};
   const lam=best.lam, outKV=nout*b.sTok, perReqWrite=(1-use)*S_pfx+outKV;
   const wrRead=lam*use*S_pfx, wrMiss=lam*perReqWrite;
-  const cacheCap=withStore?wrMiss*win*3600*RED:0;
   const daily=(withStore?wrMiss:lam*(S_pfx+outKV))*86400*b.w;
-  const wcap=elife*daily/(dwpd*DWPD_YEARS), capFinal=Math.max(cacheCap,wcap);
+  const wcap=elife*daily/(dwpd*DWPD_YEARS), capFinal=wcap;
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
-  const effWinH=wrMiss>0?capFinal/(wrMiss*3600):Infinity;
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const tRead=(use>0&&totBW>0)?readPerReq*best.k/totBW:0;
   const prefTok=withStore?b.fresh:b.prefix;
   const capHave=devsIn*capdev*1000, effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
-  const capOK=capHave>=capFinal, winOK=!Number.isFinite(effWinHave)||effWinHave>=win, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
+  const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
   return {ok:true,pd:false,best,inst:best,lam,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,
-          wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,winOK,lifeOK,bwOK,tRead,
-          prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,effWinH,daily,withStore,use,
+          wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
+          prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
           svc:best.ttftMs/1000+tRead+dwell,ttftEff:best.ttftMs+tRead*1000,
-          win,dwpd,elife,readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
+          dwpd,elife,readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
 
 function evalScene(b,sc,withStore){
   const best=pickSplit(b,sc);
   if(!best) return {ok:false};
   const lam=best.lam, capAll=best.capAll, dwell=b.dwell;
-  const win=Math.max(0.01,+$("window").value||2), dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
+  const dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
   const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0));
   const use=best.use;
   const outKV=b.nout*b.sTok;                                     // 本轮 decode 增量 KV（GB）
   const perReqWrite=(1-use)*b.S_pfx+outKV;                       // 每请求新增落盘：新前缀 + 输出增量
   const wrRead=lam*use*b.S_pfx;                                  // 设备读回 GB/s
   const wrMiss=lam*perReqWrite;                                  // 写入 GB/s（含 decode 增量）
-  const cacheCap=withStore?(wrMiss*win*3600*RED):0;
   const daily=(withStore?wrMiss:lam*(b.S_pfx+outKV))*86400*b.w;
-  const wcap=elife*daily/(dwpd*DWPD_YEARS);
-  const capFinal=Math.max(cacheCap,wcap);
+  const wcap=elife*daily/(dwpd*DWPD_YEARS);      // 满足期望寿命所需的最小容量
+  const capFinal=wcap;
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
-  const effWinH=wrMiss>0?(capFinal/(wrMiss*3600)):Infinity;   // 采用容量 ÷ 写入速率 = 实际能保留多久
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   const capHave=devsIn*capdev*1000;                          // 现有采购容量（GB）
   const effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;  // 现有容量能保留多久
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
-  const capOK=capHave>=capFinal, winOK=!Number.isFinite(effWinHave)||effWinHave>=win, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
+  const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead);
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,winOK,lifeOK,bwOK,
-          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,effWinH,
+  return {ok:true,pd:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
-          win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
+          dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
 
 /* ---------- 渲染 ---------- */
@@ -498,9 +492,9 @@ function outTable(res,withStore,note,scNote){
       const ok=v=>v?'<span class="good">✓ 达标</span>':'<span class="bad">✗ 不足</span>';
       return '<div class="kpis store">'+
         '<div><b>'+humanGB(res.capHave)+'</b><span>现有容量 · '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB '+ok(res.capOK)+'</span>'+
-          '<span class="sub">需求 '+humanGB(res.capFinal)+'（需 '+res.devsNeed+' 台）｜ 窗口 '+humanGB(res.cacheCap)+' / 寿命反推 '+humanGB(res.wcap)+'</span></div>'+
-        '<div><b>'+(Number.isFinite(res.effWinHave)?fmt(res.effWinHave,1)+' h':'–')+'</b><span>实际保留窗口 '+ok(res.winOK)+'</span>'+
-          '<span class="sub">要求 ≥ '+fmt(res.win,2)+' h ｜ 现有容量 ÷ 写入速率</span></div>'+
+          '<span class="sub">需求 '+humanGB(res.capFinal)+'（需 '+res.devsNeed+' 台，按寿命反推）</span></div>'+
+        '<div><b>'+(Number.isFinite(res.effWinHave)?fmt(res.effWinHave,1)+' h':'–')+'</b><span>实际保留窗口（派生值）</span>'+
+          '<span class="sub">现有容量 ÷ 写入速率，约 '+fmt(res.effWinHave/24,1)+' 天</span></div>'+
         '<div><b>'+(Number.isFinite(res.lifeHave)?fmt(res.lifeHave,1)+' 年':'–')+'</b><span>实际寿命 '+ok(res.lifeOK)+'</span>'+
           '<span class="sub">要求 ≥ '+fmt(res.elife,1)+' 年 ｜ DWPD×现有容量×5 年÷日写入</span></div>'+
         '<div><b>'+fmt(res.totBW)+'</b><span>现有带宽 GB/s '+ok(res.bwOK)+'</span>'+
@@ -528,10 +522,10 @@ function outTable(res,withStore,note,scNote){
     rows.push(["命中读回 / 请求",fmt(res.readPerReq)+" GB"]);
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
-    rows.push(["容量 = max(窗口缓存, 磨损保底)","窗口 "+fmt(res.win,2)+"h → "+humanGB(res.cacheCap)+" ｜ 寿命反推 "+humanGB(res.wcap)+" → 采用 "+humanGB(res.capFinal)]);
+    rows.push(["容量需求（寿命反推）","按 DWPD "+fmt(res.dwpd,2)+"、期待 "+fmt(res.elife,1)+" 年 → "+humanGB(res.capFinal)+"（现有 "+humanGB(res.capHave)+"）"]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
-    const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/Math.max(4,+$("blk").value||128)/1024):0;
+    const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/128/1024):0;
     rows.push(["IOPS 占用",io>0?(fmt(ioNeed)+" / "+fmt(io)+"（"+(ioNeed>0?(100*ioNeed/io).toFixed(0)+"%":"–")+"）"):"未填（不约束）"]);
   }
   let h='<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span>'+(withStore?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
@@ -539,11 +533,11 @@ function outTable(res,withStore,note,scNote){
   if(withStore){
     const miss=[];
     if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
-    if(!res.winOK) miss.push("保留窗口 "+fmt(res.effWinHave,1)+" h ＜ 要求 "+fmt(res.win,2)+" h");
+
     if(!res.lifeOK) miss.push("寿命 "+fmt(res.lifeHave,2)+" 年 ＜ 要求 "+fmt(res.elife,1)+" 年");
     if(!res.bwOK) miss.push("带宽 "+fmt(res.totBW)+" ＜ 需求 "+fmt(res.wrMiss+res.wrRead)+" GB/s");
     if(miss.length) h+='<p class="bad" style="font-weight:800;margin:8px 0 2px">✗ 现有配置不满足：'+miss.join("；")+'</p>';
-    else h+='<p class="good" style="font-weight:700;margin:8px 0 2px">✓ 现有 '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB 满足保留窗口 '+fmt(res.win,2)+' h 与寿命 '+fmt(res.elife,1)+" 年</p>";
+    else h+='<p class="good" style="font-weight:700;margin:8px 0 2px">✓ 现有 '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB 满足寿命 '+fmt(res.elife,1)+' 年，实际可保留 '+fmt(res.effWinHave,1)+' h</p>';
   }
   if(note) h+='<p class="hint'+(scNote?" bad":"")+'" style="margin:6px 0 2px">'+note+'</p>';
   h+='<table class="out-tb">'+rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+'</td></tr>').join("")+'</table>';
@@ -585,7 +579,7 @@ function recalc(){
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
   const A=b.pd?evalScene(b,{store:false,devBW:0,devIOPS:0,blk:128},false):evalMixed(b,{store:false,devBW:0,devIOPS:0,blk:128},false);
-  const blk=Math.max(4,+$("blk").value||128), iops=Math.max(0,+$("iops").value||0), tot=bwdev*devsIn;
+  const blk=128, iops=Math.max(0,+$("iops").value||0), tot=bwdev*devsIn;   // 块大小固定 128 KB
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
@@ -613,7 +607,7 @@ function applyPreset(){
   if(p.inTok==null){ $("scenhint").textContent="自定义：直接填三段长度"; return; }
   const hist=Math.round(p.inTok*p.hit), fresh=p.inTok-hist;
   $("hist").value=hist; $("fresh").value=fresh; $("nout").value=p.out;   // 保留窗口不跟着改：容量始终按你填的窗口 + SSD 寿命算
-  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out+" · 该场景建议 KV 保留 "+p.days+" 天（保留窗口仍按左侧输入，默认 2h）";
+  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out+" · 该场景建议 KV 保留 "+p.days+" 天（实际保留窗口由「台数×容量」反推，见结果区）";
 }
 
 {const ms=$("model"); MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n;ms.appendChild(o);});
