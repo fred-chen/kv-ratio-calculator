@@ -424,7 +424,8 @@ function outTable(res,withStore,note,scNote){
     '<div><b>'+fmt(res.tokps)+'</b><span>decode 吞吐（吐）· tok/s</span></div></div>'+
     (withStore?'<div class="kpis store">'+
       '<div><b>'+humanGB(res.capFinal)+'</b><span>容量需求（采用）· 需 '+res.devsNeed+' 台</span></div>'+
-      '<div><b>'+fmt(res.wrMiss+res.wrRead)+'</b><span>带宽需求 GB/s（写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+'）</span></div>'+
+      (function(){ const perDev=res.devsIn>0?res.totBW/res.devsIn:0, bwDevs=perDev>0?Math.ceil((res.wrMiss+res.wrRead)/perDev):0;
+        return '<div><b>'+fmt(res.wrMiss+res.wrRead)+'</b><span>带宽需求 GB/s（写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+'）· 需 '+bwDevs+' 台</span></div>'; })()+
       '<div><b>'+(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+' h':'–')+'</b><span>最终保留窗口 · 约 '+fmt(res.effWinH/24,1)+' 天</span></div></div>':'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
