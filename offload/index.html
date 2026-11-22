@@ -192,8 +192,8 @@ function tpInNode(g0,g){ return g0.tp<=g ? 1 : 0; } // TP 跨机只是弱偏好�
 function legalGrids(m,g,s){
   const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
   // TP 上限 = 1 个 NV 域（256 卡）；同时至少允许 2 台机（max(16,g)）
-  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
-  for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:Math.max(1,Math.ceil(t/kvHeads))}); }
+  const kvHeads=Math.max(1,m.nkv||1), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
+  for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:(m.cls==="mla"?1:(t<=kvHeads?1/t:1))}); }
   if(!out.length) return out;
   const pref=out.filter(x=>x.tp<=tpMax), pool=(pref.length?pref:out.slice());
   pool.sort((a,b)=>{const xa=a.tp<=g,xb=b.tp<=g; if(xa!==xb)return xa?-1:1; return xa?b.tp-a.tp:a.tp-b.tp;});
