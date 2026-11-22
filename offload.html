@@ -77,7 +77,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 .res-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .res-h h2{margin:0;font-size:16.5px}
 .tag{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--sub);font-weight:600;background:#fafbfc;white-space:nowrap}
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 6px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 6px}
 .kpis>div{background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:8px 11px}
 .kpis b{display:block;font-size:21px;line-height:1.2;color:var(--ink);font-variant-numeric:tabular-nums}
 .kpis span{font-size:11.5px;color:var(--sub)}
@@ -402,7 +402,8 @@ function evalScene(b,sc,withStore){
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
-  return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
+  const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
+  return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,effWinH,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -419,15 +420,16 @@ function outTable(res,withStore,note,scNote){
   const kpi='<div class="kpis">'+
     '<div><b>'+fmt(res.lam)+'</b><span>到达率 λ · req/s</span></div>'+
     '<div><b>'+fmt(res.capAll)+'</b><span>并发上限 · 条</span></div>'+
-    '<div><b>'+fmt(res.tokps)+'</b><span>吞吐 · tok/s</span></div></div>'+
+    '<div><b>'+fmt(res.prefTokps)+'</b><span>prefill 吞吐（吞）· tok/s</span></div>'+
+    '<div><b>'+fmt(res.tokps)+'</b><span>decode 吞吐（吐）· tok/s</span></div></div>'+
     (withStore?'<div class="kpis store">'+
       '<div><b>'+humanGB(res.capFinal)+'</b><span>容量需求（采用）· 需 '+res.devsNeed+' 台</span></div>'+
       '<div><b>'+fmt(res.wrMiss+res.wrRead)+'</b><span>带宽需求 GB/s（写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+'）</span></div>'+
       '<div><b>'+(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+' h':'–')+'</b><span>最终保留窗口 · 约 '+fmt(res.effWinH/24,1)+' 天</span></div></div>':'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
-  rows.push(["推荐 P 池","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
-  rows.push(["推荐 D 池","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；可服务 "+fmt(s.dSup)+" req/s）"]);
+  rows.push(["推荐 P 池（吞）","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
+  rows.push(["推荐 D 池（吐）","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s.dSup)+" req/s）"]);
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
