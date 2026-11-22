@@ -445,6 +445,9 @@ function evalMixed(b,sc,withStore){
       bnd=capB;
     }
     if(!(lam>0)) continue;
+    const totalCompute=used*g*pf*MFU*1e15, prefillSec=flEff*fac;
+    const lamSlo=prefillSec>0?totalCompute*SLO_TOL/prefillSec:Infinity;
+    if(lamSlo<lam){ lam=lamSlo; bnd="SLO（ITL 抖动）"; }
     const cand={s,k,used,g:g0,fac,lam,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
                 capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/(used*g*pf*MFU*1e15)};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
@@ -545,7 +548,6 @@ function outTable(res,withStore,note,scNote){
   rows.push(["推荐 D 池（吐）","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s.dSup)+" req/s）"]);
   }
   if(res.pd===false) rows.push(["混部说明","按「算力合计（prefill+decode）」与 HBM 显存/带宽取小；并按 ITL 约束限制前缀算力占比 ≤ "+fmt(100*SLO_TOL,0)+"%，保证单流速度不低于目标的 "+(100*(1-SLO_TOL)).toFixed(0)+"%"]);
-  rows.push(["SLO 有效服务能力",(res.goodput!=null?fmt(res.goodput,1):fmt(res.lam,1))+" req/s"+(res.pd===false?"（=λ × "+fmt(100*Math.min(1,res.speed/res.tps),0)+"% 速度折扣）":"（PD 无折扣，=λ）")]);
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
       ? ("≈ "+fmt(res.itlMs,1)+" ms（约 "+fmt(1000/res.itlMs,1)+" tok/s；前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=tgt/(1-SLO_TOL)+0.05?' <span class="good">✓ 达标</span>':' <span class="bad">✗ 超标</span>'))
@@ -611,7 +613,7 @@ function compare(A,B,note){
 /* ---------- 主流程 ---------- */
 let LAST_A=null, LAST_B=null, PD_AUTO=true, PD_MANUAL=false, LAST_SIG="";
 const SLO_TOL=0.10;   // 允许混部单流速度比目标低 10%（≥72 tok/s），由 decode 目标隐含，不新增输入
-const SLO_ALPHA=0.5;  // 混部前缀算力每占 1%，单流速度约降 0.5%（部分重叠，而非完全串行）
+const SLO_ALPHA=1.0;  // 前缀算力占比 duty 与 decode 可用算力 (1-duty) 自洽：decode 速度 = tps×(1-duty)
 function recalc(){
   const b0=readBase();
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
@@ -624,9 +626,9 @@ function recalc(){
     const score=pd=>{
       const bb=Object.assign({},b0,{pd});
       const B=pd?evalScene(bb,{store:true,devBW:tot,devIOPS:iops,blk},true):evalMixed(bb,{store:true,devBW:tot,devIOPS:iops,blk},true);
-      if(B&&B.ok) return B.goodput!=null?B.goodput:B.lam;
+      if(B&&B.ok) return B.lam;
       const A=pd?evalScene(bb,{store:false,devBW:0,devIOPS:0,blk},false):evalMixed(bb,{store:false,devBW:0,devIOPS:0,blk},false);
-      return A&&A.ok?(A.goodput!=null?A.goodput:A.lam):0;
+      return A&&A.ok?A.lam:0;
     };
     const want=score(true)>=score(false);                        // 平手取 PD
     if($("pd").checked!==want){ PD_SILENT=true; $("pd").checked=want; PD_SILENT=false; }
