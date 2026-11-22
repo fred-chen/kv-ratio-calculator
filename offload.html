@@ -171,7 +171,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 <ul>
 <li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
 <li><b>有存储（B）</b>：前缀命中率 h、命中占比 r，prefill 只重算 <b>(1−h·r)</b>；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
-<li><b>容量</b> = max（新增前缀写入 × 保留窗口 × 1.2，按期待寿命与 DWPD 反推的磨损保底容量）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
+<li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = max（写入速率 × 保留窗口 × 1.2，按期待寿命与 DWPD 反推的磨损保底容量）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
 <li>「保留窗口」始终按左侧输入（默认 2h），<b>不随场景预设变化</b>；预设给出的“建议 KV 保留 X 天”只是提示，可自行改窗口。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数）；块随机读；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
@@ -386,10 +386,12 @@ function evalScene(b,sc,withStore){
   const win=Math.max(0.01,+$("window").value||2), dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
   const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0));
   const use=best.use;
+  const outKV=b.nout*b.sTok;                                     // 本轮 decode 增量 KV（GB）
+  const perReqWrite=(1-use)*b.S_pfx+outKV;                       // 每请求新增落盘：新前缀 + 输出增量
   const wrRead=lam*use*b.S_pfx;                                  // 设备读回 GB/s
-  const wrMiss=lam*(1-use)*b.S_pfx;                              // 未命中前缀写入 GB/s
-  const cacheCap=withStore?(lam*(1-use)*b.S_pfx*win*3600*RED):0;   // 只有未命中前缀才新增缓存条目
-  const daily=(withStore?wrMiss:lam*b.S_pfx)*86400*b.w;
+  const wrMiss=lam*perReqWrite;                                  // 写入 GB/s（含 decode 增量）
+  const cacheCap=withStore?(wrMiss*win*3600*RED):0;
+  const daily=(withStore?wrMiss:lam*(b.S_pfx+outKV))*86400*b.w;
   const wcap=elife*daily/(dwpd*DWPD_YEARS);
   const capFinal=Math.max(cacheCap,wcap);
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
@@ -398,7 +400,7 @@ function evalScene(b,sc,withStore){
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
-          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,
+          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
@@ -423,7 +425,7 @@ function outTable(res,withStore,note,scNote){
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>':"0"]);
-  rows.push([withStore?"未命中写入":"KV 产生速率",fmt(res.wrMiss)+" GB/s"]);
+  rows.push([withStore?"写入（新前缀+输出增量）":"KV 产生速率（前缀+输出）",fmt(res.wrMiss)+" GB/s"+(withStore?"（其中输出 "+fmt(res.outKV)+" GB/请求）":"")]);
   rows.push([withStore?"日均写入（忙闲加权）":"若落盘·日均写入（忙闲加权）",humanGB(res.daily)+"/天"]);
   if(withStore){
     rows.push(["命中率（历史/前缀）",(100*res.use).toFixed(1)+"%（重算 "+(100*(1-res.use)).toFixed(1)+"%）"]);
