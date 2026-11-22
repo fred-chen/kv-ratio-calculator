@@ -545,7 +545,7 @@ function outTable(res,withStore,note,scNote){
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
-  rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>（实例尺寸整除余数，已计入；λ 仍取最优）':"0"]);
+  rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>（实例尺寸整除余数，已计入；仍以整集群 λ 最大为目标）':"0"]);
   rows.push([withStore?"写入（新前缀+输出增量）":"KV 产生速率（前缀+输出）",fmt(res.wrMiss)+" GB/s"+(withStore?"（其中输出 "+fmt(res.outKV)+" GB/请求）":"")]);
   rows.push([withStore?"日均写入（忙闲加权）":"若落盘·日均写入（忙闲加权）",humanGB(res.daily)+"/天"]);
   if(withStore){
@@ -626,7 +626,7 @@ function recalc(){
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
-  $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部"));
+  $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（目标：整集群 λ 最大）");
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
