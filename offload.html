@@ -83,6 +83,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 .kpis span{font-size:11.5px;color:var(--sub)}
 .kpis.store>div{background:#f5faf7;border-color:#cfe6d9}
 .kpis.store b{color:#1a6b46}
+.kpis .sub{display:block;font-size:10.5px;color:#8b93a1;margin-top:3px;line-height:1.45}
 .out-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
 .out-tb td{padding:5.5px 4px;border-bottom:1px dashed #eef1f5;vertical-align:top;line-height:1.5}
 .out-tb tr:last-child td{border-bottom:0}
@@ -422,11 +423,17 @@ function outTable(res,withStore,note,scNote){
     '<div><b>'+fmt(res.capAll)+'</b><span>并发上限 · 条</span></div>'+
     '<div><b>'+fmt(res.prefTokps)+'</b><span>prefill 吞吐（吞）· tok/s</span></div>'+
     '<div><b>'+fmt(res.tokps)+'</b><span>decode 吞吐（吐）· tok/s</span></div></div>'+
-    (withStore?'<div class="kpis store">'+
-      '<div><b>'+humanGB(res.capFinal)+'</b><span>容量需求（采用）· 需 '+res.devsNeed+' 台</span></div>'+
-      (function(){ const perDev=res.devsIn>0?res.totBW/res.devsIn:0, bwDevs=perDev>0?Math.ceil((res.wrMiss+res.wrRead)/perDev):0;
-        return '<div><b>'+fmt(res.wrMiss+res.wrRead)+'</b><span>带宽需求 GB/s（写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+'）· 需 '+bwDevs+' 台</span></div>'; })()+
-      '<div><b>'+(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+' h':'–')+'</b><span>最终保留窗口 · 约 '+fmt(res.effWinH/24,1)+' 天</span></div></div>':'');
+    (withStore?(function(){
+      const bw=res.wrMiss+res.wrRead, perDev=res.devsIn>0?res.totBW/res.devsIn:0, bwDevs=perDev>0?Math.ceil(bw/perDev):0;
+      const usePct=res.totBW>0?(100*bw/res.totBW):0;
+      return '<div class="kpis store">'+
+        '<div><b>'+humanGB(res.capFinal)+'</b><span>容量需求（采用）· 需 '+res.devsNeed+' 台</span>'+
+          '<span class="sub">窗口 '+humanGB(res.cacheCap)+' ｜ 寿命反推 '+humanGB(res.wcap)+'</span></div>'+
+        '<div><b>'+fmt(bw)+'</b><span>带宽总需求 GB/s · 需 '+bwDevs+' 台</span>'+
+          '<span class="sub">写 '+fmt(res.wrMiss)+' + 读 '+fmt(res.wrRead)+' ｜ 占用 '+(usePct).toFixed(0)+'%（可用 '+fmt(res.totBW)+'）</span></div>'+
+        '<div><b>'+(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+' h':'–')+'</b><span>最终保留窗口 · 约 '+fmt(res.effWinH/24,1)+' 天</span>'+
+          '<span class="sub">采用容量 ÷ 写入速率（含 1.2 冗余）</span></div></div>';
+    })():'');;
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
   rows.push(["推荐 P 池（吞）","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
