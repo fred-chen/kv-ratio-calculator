@@ -127,8 +127,8 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
         </div>
       </div>
       <label class="chk"><input type="checkbox" id="pd" checked> <b>PD 分离部署</b><span>不勾选＝混部：同一实例同时做 prefill 与 decode（改参数后按最佳服务能力自动勾选/取消）</span></label>
-      <div class="f2" style="margin-top:8px">
-        <div class="f"><label><b>混部效率系数</b>（%）</label><input id="mxeff" type="number" value="80" step="5" min="10" max="100"><div class="hint">prefill/decode 争用与调度损失折算；100%＝理想共享</div></div>
+      <div id="mxeffbox">
+        <div class="f" style="margin-top:8px"><label><b>混部效率系数</b>（%）</label><input id="mxeff" type="number" value="80" step="5" min="10" max="100"><div class="hint">prefill/decode 争用与调度损失折算；100%＝理想共享（仅混部时生效）</div></div>
       </div>
       <div class="hint" id="pdhint"></div>
       <h3>负载（典型场景）</h3>
@@ -631,6 +631,7 @@ function recalc(){
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
+  $("mxeffbox").style.display=b.pd?"none":"";
   $("pdhint").textContent=PD_MANUAL?("手动选择："+(b.pd?"PD 分离":"混部")+"（改任一参数后会重新自动择优；目标：整集群服务能力最大）"):("已自动按最佳服务能力选择："+(b.pd?"PD 分离":"混部")+"（目标：整集群 λ 最大）");
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
