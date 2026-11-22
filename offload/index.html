@@ -115,9 +115,9 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
         <div class="f"><label><b>计算节点数</b></label><input id="nodes" type="number" value="128" min="1" step="1"></div>
         <div class="f"><label><b>每节点 GPU 数</b></label><input id="g" type="number" value="8" min="1" step="1"></div>
         <div class="f" style="grid-column:1/-1"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint"></div></div>
-        <div class="f"><label><b>单卡 HBM 显存</b>（GB）</label><input id="hbm" type="number" value="141" step="1" min="1"></div>
-        <div class="f"><label><b>单卡 HBM 带宽</b>（TB/s）</label><input id="hbmbw" type="number" value="4.8" step="0.05" min="0.1"></div>
-        <div class="f" style="grid-column:1/-1"><label><b>单 GPU 算力</b>（PF 稠密）</label><input id="pf" type="number" value="0.99" step="0.01" min="0.01"><div class="hint" id="pfhint"></div></div>
+        <div class="f"><label><b>单卡 HBM 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
+        <div class="f"><label><b>单卡 HBM 带宽</b>（TB/s）</label><input id="hbmbw" type="number" value="3.35" step="0.05" min="0.1"></div>
+        <div class="f" style="grid-column:1/-1"><label><b>单 GPU 算力</b>（PF 稠密）</label><input id="pf" type="number" value="0.7" step="0.01" min="0.01"><div class="hint" id="pfhint"></div></div>
       </div>
       <label class="chk"><input type="checkbox" id="pd" checked> <b>PD 分离部署</b><span>不勾选＝混部：同一实例同时做 prefill 与 decode</span></label>
       <h3>模型与精度</h3>
@@ -597,7 +597,7 @@ function applyPreset(){
 
 {const ms=$("model"); MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n;ms.appendChild(o);});
  ms.value=String(MODELS.findIndex(m=>m.n.indexOf("Qwen3.8-2.4T")>=0));}
-{const gs=$("gpu"); GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0];gs.appendChild(o);}); gs.value="6";}
+{const gs=$("gpu"); GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0];gs.appendChild(o);}); gs.value="0";}
 {const ss=$("scen"); PRESETS.forEach((p,i)=>{const o=document.createElement("option");o.value=i;o.textContent=p.n;ss.appendChild(o);}); ss.value="0";}
 modelSync(); gpuSync(); modelSync(); applyPreset();
 $("gpu").addEventListener("change",()=>{gpuSync();recalc();});
