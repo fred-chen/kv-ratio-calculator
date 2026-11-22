@@ -171,7 +171,8 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 <ul>
 <li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
 <li><b>有存储（B）</b>：前缀命中率 h、命中占比 r，prefill 只重算 <b>(1−h·r)</b>；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
-<li><b>容量</b> = 前缀 KV 缓存量（λ×r×S×窗口×1.2，保守）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×容量×5 年÷日均写入。</li>
+<li><b>容量</b> = max（新增前缀写入 × 保留窗口 × 1.2，按期待寿命与 DWPD 反推的磨损保底容量）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
+<li>「保留窗口」始终按左侧输入（默认 2h），<b>不随场景预设变化</b>；预设给出的“建议 KV 保留 X 天”只是提示，可自行改窗口。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数）；块随机读；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></div>
@@ -420,7 +421,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["命中读回 / 请求",fmt(res.readPerReq)+" GB"]);
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
-    rows.push(["容量（新增前缀×"+fmt(res.win,2)+"h ×1.2）",fmt(res.cacheCap)+" GB（磨损保底 "+fmt(res.wcap)+" GB）"]);
+    rows.push(["容量 = max(窗口缓存, 磨损保底)","窗口 "+fmt(res.win,2)+"h → "+fmt(res.cacheCap)+" GB ｜ 寿命反推 "+fmt(res.wcap)+" GB → 采用 "+fmt(res.capFinal)+" GB"]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
     const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/Math.max(4,+$("blk").value||128)/1024):0;
@@ -493,8 +494,8 @@ function applyPreset(){
   const p=PRESETS[+$("scen").value]||PRESETS[PRESETS.length-1];
   if(p.inTok==null){ $("scenhint").textContent="自定义：直接填三段长度"; return; }
   const hist=Math.round(p.inTok*p.hit), fresh=p.inTok-hist;
-  $("hist").value=hist; $("fresh").value=fresh; $("nout").value=p.out; $("window").value=p.days*24;
-  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out+" · 建议保留 "+p.days+" 天";
+  $("hist").value=hist; $("fresh").value=fresh; $("nout").value=p.out;   // 保留窗口不跟着改：容量始终按你填的窗口 + SSD 寿命算
+  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out+" · 该场景建议 KV 保留 "+p.days+" 天（保留窗口仍按左侧输入，默认 2h）";
 }
 
 {const ms=$("model"); MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n;ms.appendChild(o);});
