@@ -395,12 +395,13 @@ function evalScene(b,sc,withStore){
   const wcap=elife*daily/(dwpd*DWPD_YEARS);
   const capFinal=Math.max(cacheCap,wcap);
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
+  const effWinH=wrMiss>0?(capFinal/(wrMiss*3600)):Infinity;   // 采用容量 ÷ 写入速率 = 实际能保留多久
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
   const totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   return {ok:true,best,lam,capAll,dwell,tokps:lam*b.nout,wrRead,wrMiss,cacheCap,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,
-          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
+          tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,effWinH,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           win,dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
@@ -431,7 +432,8 @@ function outTable(res,withStore,note,scNote){
     rows.push(["命中率（历史/前缀）",(100*res.use).toFixed(1)+"%（重算 "+(100*(1-res.use)).toFixed(1)+"%）"]);
     rows.push(["命中读回 / 请求",fmt(res.readPerReq)+" GB"]);
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
-    rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
+    rows.push(["等效保留窗口（采用容量÷写入）",(Number.isFinite(res.effWinH)?fmt(res.effWinH,1)+" h（约 "+fmt(res.effWinH/24,1)+" 天）":"–")]);
+  rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
     rows.push(["容量 = max(窗口缓存, 磨损保底)","窗口 "+fmt(res.win,2)+"h → "+humanGB(res.cacheCap)+" ｜ 寿命反推 "+humanGB(res.wcap)+" → 采用 "+humanGB(res.capFinal)]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
