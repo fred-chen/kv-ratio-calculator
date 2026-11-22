@@ -276,7 +276,13 @@ const GPUS=[
  ["海光 BW1000（深算三号）",null,0.48,64,"FP16 480 TF（部署文档口径，官方未直接公布）；BW1000_H 低配档 130 TF；64GB HBM2e 1.6 TB/s（部署文档口径）",1.6],
  ["海光 BW1100",0.26,0.13,144,"144GB HBM3e 模组卡、原生 FP8；算力官方未公布，按 2026 白皮书配置表 FP8≈260 / FP16≈130 TF；显存带宽官方未公布，按同代 HBM3e 估算 3.35 TB/s（可手改）",3.35],
 ]
-const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
+const humanGB=g=>{
+  const a=Math.abs(g);
+  if(a>=1e6) return (g/1e6).toLocaleString("zh",{maximumFractionDigits:2})+" PB";
+  if(a>=1e3) return (g/1e3).toLocaleString("zh",{maximumFractionDigits:2})+" TB";
+  if(a>=1)   return g.toLocaleString("zh",{maximumFractionDigits:2})+" GB";
+  return (g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
+};
 const fmt=(v,d)=>Number.isFinite(v)?v.toLocaleString("zh",{maximumFractionDigits:d!=null?d:(v>=100?0:(v>=10?1:2))}):"–";
 
 /* ---------- 型号/精度联动 ---------- */
@@ -415,13 +421,13 @@ function outTable(res,withStore,note,scNote){
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>':"0"]);
   rows.push([withStore?"未命中写入":"KV 产生速率",fmt(res.wrMiss)+" GB/s"]);
-  rows.push([withStore?"日均写入（忙闲加权）":"若落盘·日均写入（忙闲加权）",fmt(res.daily)+" GB/天"]);
+  rows.push([withStore?"日均写入（忙闲加权）":"若落盘·日均写入（忙闲加权）",humanGB(res.daily)+"/天"]);
   if(withStore){
     rows.push(["命中率（历史/前缀）",(100*res.use).toFixed(1)+"%（重算 "+(100*(1-res.use)).toFixed(1)+"%）"]);
     rows.push(["命中读回 / 请求",fmt(res.readPerReq)+" GB"]);
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
-    rows.push(["容量 = max(窗口缓存, 磨损保底)","窗口 "+fmt(res.win,2)+"h → "+fmt(res.cacheCap)+" GB ｜ 寿命反推 "+fmt(res.wcap)+" GB → 采用 "+fmt(res.capFinal)+" GB"]);
+    rows.push(["容量 = max(窗口缓存, 磨损保底)","窗口 "+fmt(res.win,2)+"h → "+humanGB(res.cacheCap)+" ｜ 寿命反推 "+humanGB(res.wcap)+" → 采用 "+humanGB(res.capFinal)]);
     rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
     const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/Math.max(4,+$("blk").value||128)/1024):0;
@@ -453,7 +459,7 @@ function compare(A,B,note){
    line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
    '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>'+
    '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
-   '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+fmt(B.cacheCap)+' GB · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
+   '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
    '</table><div class="note-box">'+conclude+'</div>';
 }
 
