@@ -617,6 +617,7 @@ modelSync(); gpuSync(); modelSync(); applyPreset();
 $("gpu").addEventListener("change",()=>{gpuSync();recalc();});
 $("model").addEventListener("change",()=>{modelSync();recalc();});
 $("bw").addEventListener("change",()=>{pfSync();recalc();});
+$("bk").addEventListener("change",recalc);
 $("scen").addEventListener("change",()=>{applyPreset();recalc();});
 $("pd").addEventListener("change",recalc);
 document.querySelectorAll("input").forEach(e=>e.addEventListener("input",recalc));
