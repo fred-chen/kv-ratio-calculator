@@ -86,7 +86,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
       <div class="f"><label><b>模型</b></label><select id="model"></select><div class="hint" id="modelhint"></div></div>
       <div class="f"><label><b>模型权重精度</b></label><select id="bw"><option value="2">BF16（2 B/参数）</option><option value="1">FP8（1 B/参数）</option><option value="0.5">NVFP4（0.5 B/参数）</option></select></div>
       <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16（2 B/元素）</option><option value="1">FP8（1 B/元素）</option></select></div>
-      <div class="f"><label><b>上下文长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"><div class="hint" id="ctxhint"></div></div>
+      <div class="f"><label><b>前缀长度</b>（token）</label><input id="ctx" type="number" value="65536" step="1024" min="1"><div class="hint" id="ctxhint"></div></div>
       <div class="f"><label><b>每请求输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"></div>
       <div class="f"><label><b>decode 目标吞吐</b>（tok/s · 每流）</label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint">单请求 decode 停留时长 = 输出长度 ÷ tps</div></div>
       <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"><div class="hint">用于挑 prefill 并行形状，超出会标红</div></div>
@@ -134,7 +134,7 @@ summary{cursor:pointer;color:var(--sub);user-select:none}
 <li>读写共用同一设备带宽池；块随机读；未建模元数据/EC 额外开销与回读延迟（延迟只影响可行性判断，不进 tok/s）。</li>
 <li>没有需求参数：两栏都是「固定总节点、最大化到达率」的搜索，输出的是客观服务能力上限。</li>
 </ul></div>
-<p class="hint" style="margin-top:10px">口径：无存储 = 每个请求前缀全部重算（prefill 按整段上下文算），在途 KV 常驻 HBM；有存储 = 前缀命中率 h、命中占比 r，prefill 只重算 (1−h·r)，命中前缀的 KV 从设备一次性读回 HBM（decode 阶段两场景的 KV 都在 HBM，所以 D 池能力相同，收益全部来自少算 prefill）。容量 = 前缀 KV 缓存量（λ×r×S×窗口×1.2），寿命 = DWPD×容量×5 年÷未命中日写入。</p>
+<p class="hint" style="margin-top:10px">口径：无存储 = 每个请求前缀全部重算（prefill 按整段前缀算），在途 KV 常驻 HBM；有存储 = 前缀命中率 h、命中占比 r，prefill 只重算 (1−h·r)，命中前缀的 KV 从设备一次性读回 HBM（decode 阶段两场景的 KV 都在 HBM，所以 D 池能力相同，收益全部来自少算 prefill）。容量 = 前缀 KV 缓存量（λ×r×S×窗口×1.2），寿命 = DWPD×容量×5 年÷未命中日写入。</p>
 </main>
 <script>
 const $=id=>document.getElementById(id);
