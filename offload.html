@@ -439,7 +439,8 @@ function evalMixed(b,sc,withStore){
       if(sc.devIOPS>0){ const blocks=readPerReq*1e9/128/1024, ioCap=sc.devIOPS/Math.max(1e-9,blocks); if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS"; } }
     }
     if(!(lam>0)) continue;
-    const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used};
+    const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
+      capAll:Math.max(1,Math.floor(lam*dwell)), util:lam*(flEff*fac+decFL)/Math.max(1e-9,used*g*pf*MFU*1e15)};
     const okT=ttft>0&&ttftMs<=ttft?1:0;
     if(!best||okT>best.okT||(okT===best.okT&&(lam>best.lam+1e-9||(Math.abs(lam-best.lam)<=1e-9&&cand.idle<best.idle)))) best=Object.assign({okT},cand);
   }
@@ -541,7 +542,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["ITL 校核（TPOT）", res.pd===false
       ? ("≈ "+fmt(res.itlMs,1)+" ms（约 "+fmt(1000/res.itlMs,1)+" tok/s；前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=tgt/(1-SLO_TOL)+0.05?' <span class="good">✓ 达标</span>':' <span class="bad">✗ 超标</span>'))
       : (fmt(tgt,1)+" ms（D 池纯 decode，无前缀干扰）<span class=\"good\">✓ 达标</span>")]); }
-  rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s）"]);
+  rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s = 输出 "+(res.nout||0)+" ÷ 目标 "+fmt(+$("tps").value||80,0)+" tok/s，是目标值不是上限）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>（实例尺寸整除余数，已计入；仍以整集群 λ 最大为目标）':"0"]);
