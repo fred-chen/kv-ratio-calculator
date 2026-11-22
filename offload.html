@@ -357,7 +357,8 @@ function pickSplit(b,sc){
       }
     }
     if(!(lam>0)) continue;
-    const cand={nP:pP.used,nD:dP.used,lam,capAll:Math.max(1,Math.floor(lam*dwell)),bnd,pP,dP,capE,capM,capP,use,readPerReq,flEff};
+    const cand={nP:pP.used,nD:dP.used,lam,capAll:Math.max(1,Math.floor(lam*dwell)),bnd,pP,dP,capE,capM,capP,use,readPerReq,flEff,
+                dSup:Math.min(capE,capM)/dwell};   // D 池自身能承接的 req/s（不含 P / 设备约束）
     if(!best||cand.lam>best.lam+1e-12||(Math.abs(cand.lam-best.lam)<=1e-12&&cand.capAll>best.capAll)) best=cand;
   }
   return best;
@@ -398,8 +399,8 @@ function outTable(res,withStore,note,scNote){
     '<div><b>'+fmt(res.tokps)+'</b><span>吞吐 · tok/s</span></div></div>';
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
-  rows.push(["推荐 P 池","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；形状 ×"+s.pP.fac.toFixed(2)+"）"]);
-  rows.push(["推荐 D 池","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；形状 ×"+s.dP.fac.toFixed(2)+"）"]);
+  rows.push(["推荐 P 池","P "+s.nP+" 节点（"+s.pP.k+" × "+s.pP.s+"；"+pG+"；供给 "+fmt(s.pP.supplyEff)+" req/s）"]);
+  rows.push(["推荐 D 池","D "+s.nD+" 节点（"+s.dP.k+" × "+s.dP.s+"；"+dG+"；可服务 "+fmt(s.dSup)+" req/s）"]);
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+(res.ttftEff).toFixed(0)+" ms + decode "+fmt(res.dwell,2)+" s）"]);
   rows.push(["TTFT 校核",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   rows.push(["受限项",res.best.bnd]);
