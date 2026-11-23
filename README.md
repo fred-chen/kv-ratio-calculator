@@ -1,4 +1,14 @@
-# KV 卸载与实例规模计算器（简化版）
+# KV 卸载与实例规模计算器
+
+## 页面地址
+
+| 页面 | URL |
+|---|---|
+| **新计算器**（有无 KV 缓存对比，P/D 分离） | https://www.chenp.net/kv-calc/ ｜ https://fred-chen.github.io/kv-ratio-calculator/ |
+| **旧计算器**（存档版） | https://www.chenp.net/kv-calc/old-calc/ ｜ https://fred-chen.github.io/kv-ratio-calculator/old-calc/ |
+| 新计算器兼容别名 | `/offload.html`、`/offload/` |
+
+> 注意：根路径 `/` 现在是**新计算器**；旧计算器（单实例推导、无 P/D 对比）已移到 `/old-calc/`，内容与旧版逐字节一致（md5 `4d430a3b7c6fb77ba3c225763848f596`）。
 
 单页静态计算器，无后端、数据不出浏览器。回答三个问题：
 

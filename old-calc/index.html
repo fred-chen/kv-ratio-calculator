@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KV 卸载与实例规模计算器 · 简化版</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗄️</text></svg>">
+<style>
+:root{--red:#E2231A;--ink:#1a2233;--sub:#5b6577;--line:#e6e9ef;--bg:#f6f7fa;--card:#fff;--ok:#0d8a4f;--warn:#c47f00;--bad:#d33;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;background:var(--bg);color:var(--ink);line-height:1.55}
+header{background:linear-gradient(135deg,#1a2233,#2c3a55);color:#fff;padding:26px 22px}
+header h1{font-size:21px;font-weight:700}
+header p{color:#aeb9cc;font-size:13px;margin-top:6px}
+main{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template-columns:390px 1fr;gap:16px}
+@media(max-width:900px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px}
+.card h2{font-size:14px;color:var(--red);margin-bottom:12px;letter-spacing:.5px}
+.f{margin-bottom:11px}
+.f label{display:block;font-size:12.5px;color:var(--sub);margin-bottom:3px;min-height:17px}
+.f label b{color:var(--ink);font-weight:600}
+.f input,.f select{width:100%;padding:7px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:14px;background:#fff}
+.f input:focus,.f select:focus{outline:2px solid #f3b7b4;border-color:var(--red)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13.5px;padding:6px 0}
+.chk input{width:16px;height:16px;accent-color:var(--red)}
+.hint{font-size:11.5px;color:#8a93a5;margin-top:2px}
+.risk{color:var(--bad);font-weight:800}
+.hot{color:var(--red);font-weight:800}
+.pfb{display:inline-block;white-space:nowrap;font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:1.5px 6px;border-radius:8px;margin-left:6px;vertical-align:2px;letter-spacing:.2px}
+.res-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mini{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:10px;padding:9px 13px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--sub)}
+.mini b{color:var(--ink);font-weight:700;font-size:14.5px;font-variant-numeric:tabular-nums}
+
+.kpi{background:linear-gradient(160deg,#fff,#faf6f6);border:1px solid #f0dcd9;border-radius:10px;padding:14px;text-align:center}
+.kpi .t{font-size:13.5px;color:var(--ink);font-weight:600;margin-bottom:8px;line-height:1.35}
+.kpi .v{font-size:32px;font-weight:800;color:var(--red);line-height:1.15}
+.kpi .u{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.5}
+table{width:100%;border-collapse:collapse;font-size:13px}
+td{padding:6px 8px;border-bottom:1px solid var(--line)}
+td:first-child{color:var(--sub)}
+td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+.chk-list{list-style:none;font-size:13px}
+.chk-list li{padding:7px 0;border-bottom:1px dashed var(--line)}
+.chk-list li:last-child{border:none}
+.ok::before{content:"✓ ";color:var(--ok);font-weight:700}
+.warn::before{content:"⚠ ";color:var(--warn);font-weight:700}
+.bad::before{content:"✗ ";color:var(--bad);font-weight:700}
+details{margin-top:8px;font-size:13px}
+summary{cursor:pointer;color:var(--sub);user-select:none}
+.foot{max-width:1080px;margin:0 auto 40px;padding:0 16px}
+.foot .card{font-size:13px;color:var(--sub)}
+.foot h3{font-size:13.5px;color:var(--ink);margin:10px 0 5px}
+.foot code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
+.foot a{color:#2b6cb0;text-decoration:none}
+.mdb{width:100%;font-size:12px}
+.mdb th{background:#eef1f6;padding:5px 7px;text-align:left;border-bottom:2px solid var(--line)}
+.mdb td{padding:4px 7px;border-bottom:1px solid var(--line)}
+.mdb td:last-child{text-align:left;font-weight:400}
+.badge{display:inline-block;font-size:10.5px;border:1px solid #ccd;padding:0 5px;border-radius:8px;margin-left:6px;color:var(--sub)}
+</style>
+</head>
+<body>
+<header>
+  <h1>KV 卸载与实例规模计算器 <span class="badge" style="color:#ffd;border-color:#ffd">简化版</span></h1>
+  <p>模型占满全部计算节点 · 输出可承载实例数 / 单 token KV / 卸载设备容量与带宽 · 容量双口径（保留窗口制 ｜ 在途工作集制）· v1.9</p>
+</header>
+
+<main>
+  <!-- ============ 输入 ============ -->
+  <section>
+    <div class="card"><h2>计算节点</h2>
+      <div class="grid2">
+        <div class="f"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint">选择型号自动填算力/显存；也可「自定义」后手改</div></div>
+        <div class="f"><label style="display:flex;align-items:center;gap:6px;white-space:nowrap"><b>单 GPU 算力</b><span id="pfbadge" class="pfb">FP8 稠密</span></label><input id="pf" type="number" value="1.4" step="0.1" min="0.1"><div class="hint" id="pfhint"></div></div>
+        <div class="f"><label><b>单 GPU 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
+        <div class="f"><label><b>单卡 HBM 带宽</b>（TB/s）</label><input id="hbmbw" type="number" value="3.35" step="0.05" min="0.1"><div class="hint">decode 是<b>访存受限</b>：H100 3.35 · H200 4.8 · B200 8.0 · A100 2.0（选型号会自动填）</div></div>
+        <div class="f"><label><b>单计算节点 GPU 数</b></label><input id="g" type="number" value="8" step="1" min="1"></div>
+        <div class="f"><label><b>计算节点总数</b></label><input id="nodes" type="number" value="32" step="1" min="1"></div>
+      </div>
+      <div class="hint" id="gpuhint" style="font-size:13px;color:var(--ink);margin-top:4px"></div>
+    </div>
+    <div class="card"><h2>闪存硬件</h2>
+      <div class="grid2">
+        <div class="f"><label><b>DWPD</b>（满盘写入/天）</label><input id="dwpd" type="number" value="1" step="0.1" min="0.01"><div class="hint">企业级 SSD 写入耐久，常见 1 / 3 / 10</div></div>
+        <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="3" step="1" min="0.1" placeholder="留空 = 不参与"><div class="hint">留空不参与容量推算；填写后按日写入量反推磨损保底容量，与保留窗口容量取大</div></div>
+      </div>
+    </div>
+    <div class="card"><h2>模型与精度</h2>
+      <div class="f"><label><b>模型</b>（架构参数取自 HuggingFace config，见页脚）</label><select id="model"></select><div class="hint" id="mnote"></div></div>
+      <div class="grid2">
+        <div class="f"><label><b>模型权重精度</b></label><select id="bw"><option value="2">BF16 / FP16（2 B/参数）</option><option value="1" selected>FP8（1 B/参数）</option><option value="0.5">INT4 / NVFP4（0.5 B/参数）</option></select></div>
+        <div class="f"><label><b>KV 精度</b></label><select id="bk"><option value="2">BF16（2 B/元素）</option><option value="1" selected>FP8（1 B/元素）</option><option value="0.5">INT4/NVFP4（0.5 B/元素）</option></select></div>
+      </div>
+      <div class="hint" style="margin-top:4px">切换模型时两个精度自动置为<b>原生默认</b>：FP8 / FP4（NVFP4）权重模型 → KV 默认 FP8；BF16 权重模型 → KV 默认 BF16；手动改过的手动值保留。</div>
+      <label class="chk"><input type="checkbox" id="pd" checked> PD 分离（Prefill / Decode 分离部署，每个实例各持一份权重）</label>
+      <div id="pdblock" style="display:none;margin-top:8px;padding:9px 11px;background:#fafbfc;border:1px solid var(--line);border-radius:8px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;justify-content:space-between">
+          <b style="font-size:13px">PD 配比</b>
+          <label style="font-size:12.5px" title="Prefill 池节点数">P <input id="pnodes" type="number" value="0" min="0" step="1" style="width:52px;padding:5px 6px;text-align:center"></label>
+          <label style="font-size:12.5px" title="Decode 池节点数">D <input id="dnodes" type="number" value="0" min="0" step="1" style="width:52px;padding:5px 6px;text-align:center"></label>
+          <span id="pdidle" style="font-size:12px;padding:5px 9px;border:1px dashed var(--line);border-radius:6px;background:#fff;color:var(--sub);flex:0 0 auto"></span>
+        </div>
+        <div style="margin-top:6px"><button id="pdbal" type="button" style="font-size:12.5px;padding:5px 10px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer">按算力均衡推荐</button></div>
+        <div class="hint" id="pdhint" style="margin-top:5px"></div>
+      </div>
+    </div>
+    <div class="card"><h2>负载与 SLA</h2>
+      <div class="grid2">
+        <div class="f"><label><b id="inflight_lbl">峰值并发请求数</b><span id="infl_unit" style="color:var(--sub);font-weight:400">（集群总）</span></label><input id="inflight" type="number" value="40" step="1" min="1"><div class="hint" id="inflhint">需求参数：整个集群的峰值并发请求数（全部实例合计）；硬件只决定上限。默认按 λ 最大反解：P 池打满（并发 = P 供给 × 输出长 ÷ tps），D 池「够服务该并发」即止——但 D 必须放一份完整权重，其最小节点数往往已远超并发所需的 decode 算力（大模型下 D 利用率偏低，明细可见）；手改并发后不再自动跟随，换模型/切 PD 会重算</div></div>
+        <div class="f"><label><b>上下文长度</b>（token）</label>
+          <select id="ctxmode" style="margin-bottom:6px"><option value="single" selected>单值（按平均值估算）</option><option value="dist">区间（按正态分布估算）</option></select>
+          <div id="ctxsingle"><input id="ctx" type="number" value="65536" step="1024" min="1"></div>
+          <div id="ctxdist" style="display:none;gap:6px;align-items:center;flex-wrap:wrap">
+            <span style="color:var(--sub);font-size:12.5px">最小</span><input id="ctxmin" type="number" value="16384" step="1024" min="1" style="width:110px">
+            <span style="color:var(--sub);font-size:12.5px">最大</span><input id="ctxmax" type="number" value="114688" step="1024" min="1" style="width:110px">
+          </div>
+          <div class="hint" id="ctxhint"></div>
+        </div>
+        <div class="f"><label><b>每请求平均输出长度</b>（token）</label><input id="nout" type="number" value="512" step="1" min="1"><div class="hint">用于把 decode 吞吐换算为请求到达率</div></div>
+        <div class="f"><label><b>decode 目标吞吐</b></label><input id="tps" type="number" value="80" step="1" min="1"><div class="hint" id="tpshint">tok/s · 每流</div></div>
+        <div class="f"><label><b>TTFT 目标</b>（ms · 每流）</label><input id="ttft" type="number" value="500" step="50" min="1"></div>
+        <div class="f"><label><b>KV 保留窗口</b>（小时）</label><input id="thold" type="number" value="2" step="0.5" min="0.01"><div class="hint">卸载容量 = 写入速率 × 窗口 × 1.2 × 负荷系数</div></div>
+        <div class="f" style="grid-column:1/-1;margin-top:2px"><label><b>忙闲分时负荷</b>（% 峰值，用于磨损的 24h 加权）</label>
+          <div style="display:flex;flex-direction:column;gap:7px;font-size:13.5px;color:var(--sub)">
+            <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+              <span style="color:var(--ink);font-weight:600">繁忙</span>
+              <input id="bstart" type="number" value="8" min="0" max="24" step="1" style="width:56px;padding:5px 7px;text-align:center">
+              <span>—</span>
+              <input id="bend" type="number" value="18" min="0" max="24" step="1" style="width:56px;padding:5px 7px;text-align:center">
+              <span>时，负荷</span>
+              <input id="bload" type="number" value="100" min="0" max="100" step="5" style="width:56px;padding:5px 7px;text-align:center">
+              <span>%</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+              <span style="color:var(--ink);font-weight:600">闲时</span>
+              <span>（其余时段）负荷</span>
+              <input id="iload" type="number" value="20" min="0" max="100" step="5" style="width:56px;padding:5px 7px;text-align:center">
+              <span>%</span>
+            </div>
+          </div>
+          <div class="hint" id="whint"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 结果 ============ -->
+  <section>
+    <div class="res-hero" style="grid-template-columns:1.25fr 1fr 1fr">
+      <div class="kpi big"><div class="t"><b>容量需求</b></div><div class="v" id="r_cap">–</div><div class="u" id="r_capu"></div></div>
+      <div class="kpi big"><div class="t"><b>KV 产生速率（写入带宽）</b></div><div class="v" id="r_wr">–</div><div class="u" id="r_wru"></div></div>
+      <div class="kpi big"><div class="t"><b>KV 读取带宽</b></div><div class="v" id="r_rd">–</div><div class="u" id="r_rdu"></div></div>
+    </div>
+    <div class="mini">
+      <div><b id="r_inst">–</b> <span id="r_inst_l">个可承载实例</span></div>
+      <div><b id="r_rack">–</b> <span id="r_rack_l">节点 / 实例</span></div>
+      <div>单 token KV <b id="r_stok">–</b> <span id="r_stoku"></span></div>
+      <div><b id="r_capin">–</b> <span id="r_capin_l">条在途上限（算力）</span></div>
+    </div>
+    <div class="card" style="margin-top:14px"><h2>卸载设备明细（带宽已按峰值口径计入上方）</h2>
+      <table><tbody>
+        <tr><td>带宽合计 · <b>读写并发</b>（共享通道按此选型）</td><td id="r_bwsum">–</td></tr>
+        <tr><td>每请求 KV 体积 S（平均上下文）</td><td id="r_s">–</td></tr>
+        <tr id="row_idx" style="display:none"><td>其中 DSA 索引贡献（token 级状态，随 KV 同精度）</td><td id="r_idx">–</td></tr>
+        <tr id="row_state" style="display:none"><td>循环态 / 滑窗快照（每序列）</td><td id="d_state">–</td></tr>
+        <tr><td>全局请求到达率</td><td id="r_lam">–</td></tr>
+        <tr><td>KV 产生速率（集群，峰值）= 到达率 × 单请求 KV</td><td id="d_kvrate">–</td></tr>
+      </tbody></table>
+    </div>
+    <div class="card"><h2>风险告警</h2>
+      <ul class="chk-list" id="r_chk"></ul>
+    </div>
+    <div class="card"><h2>明细</h2>
+      <table><tbody>
+        <tr><td>模型权重（每实例 1 份 × 实例数）</td><td id="d_w">–</td></tr>
+        <tr><td>显存 KV 预算 / 实例（利用率 90% 内）</td><td id="d_bud">–</td></tr>
+        <tr><td>并行组合（TP 须整除头数，PP 须整除层数）</td><td id="d_grid">–</td></tr>
+        <tr><td>GPU 总数（实例占用 / 闲置）</td><td id="d_gpu">–</td></tr>
+        <tr><td>在途 KV 显存占用（水位）</td><td id="d_lv">–</td></tr>
+        <tr><td>Prefill 时长（每请求）</td><td id="d_pf">–</td></tr>
+        <tr><td>单请求服务时长（prefill + decode）</td><td id="d_svc">–</td></tr>
+        <tr><td>prefill 算力占用（按可持续流量）</td><td id="d_pfutil">–</td></tr>
+        <tr><td>decode 带宽占用（按 HBM 带宽口径）</td><td id="d_decutil">–</td></tr>
+        <tr><td>算力上限（可持续在途）/ <b>集群</b></td><td id="d_inflmax">–</td></tr>
+        <tr><td>在途工作集容量（×1.2；按当前单一上下文，未含长尾混合）</td><td id="d_work">–</td></tr>
+        <tr><td><b>等效 KV 保留窗口</b>（选型容量 ÷ 峰值写入速率）</td><td id="d_theff">–</td></tr>
+        <tr><td>忙闲负荷系数（<b>仅作用于日均写入与寿命，不影响容量</b>）</td><td id="d_cf">–</td></tr>
+        <tr><td>24h 分时加权负荷（忙/闲窗）</td><td id="d_wf">–</td></tr>
+        <tr><td>日均写入量（<b>已按忙闲加权</b>：峰值 × 24h 负荷系数）</td><td id="d_daily">–</td></tr>
+        <tr><td>对照：若全天满载（不折算）的日写入</td><td id="d_dailypeak">–</td></tr>
+        <tr><td>等效日覆盖次数（日均写入 ÷ 容量）</td><td id="d_ovw">–</td></tr>
+        <tr><td>闪存磨损预计寿命（按选型容量 × DWPD × 5 年 ÷ 日写入）</td><td id="d_life">–</td></tr>
+        <tr><td>磨损保底容量（按期待寿命反推）</td><td id="d_wcap">–</td></tr>
+      </tbody></table>
+      <details><summary>本页面用到的公式</summary><div id="f_show" style="color:var(--sub);padding-top:6px"></div></details>
+    </div>
+  </section>
+</main>
+
+<div class="foot">
+  <div class="card">
+    <h3>固定假设（不可调，均已计入公式）</h3>
+    <p><b>算力基准</b>："单 GPU 算力"填<b>矩阵乘实际执行精度的稠密（非稀疏）峰值</b>——BF16 权重按 BF16 档、FP8 权重按 FP8 档、INT4（weight-only，主流方案，反量化后用 BF16 算）按 BF16 档；厂商标称的"稀疏翻倍"数字不可用。默认 2.0 PF = H100/H200 的 FP8 稠密峰值（1979 TFLOPS）。<br>
+    <b>算力有效利用率 MFU = 50%</b>：标称 PFLOPS 是峰值，推理中注意力/通信/访存开销后实际约一半能被有效计算利用，业界大模型推理常用取值。<br>
+    <b>显存利用率 = 90%</b>：单卡显存中可安全用于"权重 + KV"的比例，余 10% 给激活值、框架缓存与碎片。<br>
+    <b>容量冗余系数 = 1.2</b>：卸载设备容量按需求上浮 20%，覆盖元数据、EC 对齐与突发。<br>
+    <b>带宽按峰值、容量可按忙闲折算</b>：写/读带宽决定「忙时瞬时吞吐能力」，必须按峰值（忙时 100%）配置，不做忙闲折减；只有容量（保留窗口能装多少）可按 24h 加权折算。<br>
+    <b>带宽合计怎么算（读写并发，v1.9）</b>：KV 写入（新 token 落盘）与 KV 读取（历史命中回源）在服务期<b>同时发生</b>。若读写共用物理通道（本地 NVMe、单套存储池、单端口网络——PCIe 与介质通道读写共享），总吞吐约为单向峰值，选型应按<b>写+读合计</b>；若读写走物理独立路径（写本地盘 + 读远端池、或全双工网络上下行独立），则按 <b>max(写, 读)</b> 即可。明细同时给出合计与 max 两个数，勿把两者相加后再拿去比"单盘顺序读带宽"——那是单向口径。<br>
+    <b>读放大系数 = 1.0</b>：假设每块 KV 在保留窗口内平均被完整读回一次（命中一次）；重访密集场景可按 2–3 倍上浮。<br>
+    <b>DSA 稀疏注意力索引已计入</b>：DeepSeek-V4.1 / GLM-5.x / Hy4 / Qwen3.8-Flash-Next 的索引状态（config 的 index_* 字段）按每 token 缓存、与 KV 同精度计入单 token KV 与卸载量——稀疏注意力省的是算力，不省这份存储。<br>
+    <b>GPU 型号库（v1.8，2026-11 联网核实）</b>：NVIDIA A 系（A100/A800：BF16 稠密 312 TF，无 FP8）；H 系（H20 0.296、H800/H100/H200 1.979 PF FP8 稠密，data sheet 头条值为稀疏口径需÷2）；B 系（B100 3.5、B200/B300 4.5 PF FP8 稠密，288/192GB）；摩尔线程 S4000（BF16 0.128，无 FP8）/S5000（FP8 1.0 PF、80GB）；海光 BW1000（FP16 0.48，官方未直接公布）/BW1100（FP8≈0.26、144GB HBM3e，官方未公布算力、按公开部署配置表口径）。选型号后按当前权重精度自动填对应档：FP8 权重→FP8 档、BF16/FP16 权重→BF16 档、INT4/NVFP4 weight-only→BF16 档（反量化后由 BF16 矩阵乘执行）。<b>算力必须与权重精度对应</b>：若所选 GPU 无该精度的 Tensor 核心（A100/A800、MTT S4000、海光 BW1000 均无 FP8），则按同级 <b>INT8 稠密折算等效</b>（INT8 稠密 ≈ 2×BF16 稠密：A100 0.624、S4000 0.256、BW1000 0.96 PF），算力框旁以「INT8 稠密（等效 FP8）」标注；自定义卡以 FP8 稠密峰值为基准，切 BF16 权重时自动 ÷2 折算显示。手动改动即视为自定义。<br>
+    <b>忙闲分时加权与闪存磨损（v1.9）</b>：24h 负荷系数 w =（忙窗小时×忙时% + 闲窗小时×闲时%）÷24，缺省 <b>08–18</b> 时忙 100%、其余闲 20%（w≈53%）。磨损寿命(年) = DWPD × 容量 × 5 ÷ 日均写入（DWPD 按 5 年保修期定义，故分子含 5 年基准；日均写入 = 峰值写带宽 × 86400 × w）；期待寿命反推保底容量 = 日均写入 × 年 ÷ (DWPD × 5)，最终选型容量取 max(保留窗口, 磨损保底)。<b>PD 分离双池模型（v1.9.2）</b>：勾选 PD 分离后出现「PD 池节点配比」——P 节点只做 prefill（产出 KV 写入存储），D 节点只做 decode（命中时从存储读回）。两池节点数<b>可直接输入</b>，「按算力均衡推荐」以<b>需求侧集群总并发 C</b> 为约束：<b>D 池只需够服务 C</b>（可服务流 = min(C, decode 带宽上限 = 实例卡数×单卡HBM带宽÷tps 扣激活权重后的余量 ÷ 每流在驻KV, 显存可驻 = (显存 − 权重×实例数) ÷ 单序列常驻 KV)），<b>其余节点全部给 P</b>（P 供给 = 节点数×算力×MFU ÷ 单请求 prefill FLOPs）；枚举 D 节点数取 <b>λ = min(D 并发×tps÷输出长, P 供给)</b> 最大者。因此<b>增大需求并发会把节点从 P 挪到 D</b>，反之释放给 P；实例粒度在并列时 P 取更大实例（prefill 更快、TTFT 更低）。系统吞吐、KV 写带宽、容量、日写入、磨损寿命均由该 λ 推导；明细给出两池利用率与瓶颈，告警提示 P/D 配比失衡或节点超配/闲置。注意：<b>每个实例各持一份完整权重，P、D 实例之间不共享</b>——全系统权重占用 = 实例总数 × 单份（如 P 3 + D 1 = 4 份），显存按每实例 1 份核算；单请求服务时长按 prefill + decode 计，<b>未含 P→D 的 KV 传输与两池排队</b>，故尾延迟（TTFT/TPOT）需以实测校正。<br>
+    <b>窗口 ⇄ 寿命的容量闭环（v1.9.1）</b>：输入的「KV 保留窗口」只是容量下限；若「期待寿命」反推的磨损保底更高，选型容量被抬到窗口之上，此时多出的容量意味着<b>实际可保留更长的 KV 窗口</b>——等效保留窗口 = 选型容量 ÷（写带宽 × 1.2），已在明细显示；也可视为容量冗余。反向耦合同样成立：调大窗口 → 容量变大 → 覆盖次数变密 → 寿命变短。<br>
+    <b>容量与忙闲无关（v1.9.1）</b>：容量估算<b>永远按给定的 KV 保留窗口全量保留</b>——即按最忙时段（窗口内满载）的写入速率 × 窗口 × 1.2 计，不受忙闲时段长短或闲时负荷影响。忙闲分时负荷<b>只作用于日写入量</b>（日均写入 = 峰值写带宽 × 86400 × w），进而影响磨损寿命与「期待寿命反推保底容量」。因此改忙时段只会改变寿命，不会改变容量 KPI（除非触发磨损保底主导）。在途工作集口径与忙闲无关（在途请求数是瞬时量）。未计 SSD 写放大与读磨损，实际寿命偏保守。「期待寿命」<b>留空即不参与容量推算</b>（容量只按保留窗口）；一旦填写，则额外反推磨损保底容量并与保留窗口取大，最终容量取 max。无论留空与否，磨损寿命低于风险线（填写时为期待寿命，<b>留空时为 3 年</b>）即以<b>红字标风险</b>。<br>
+    <b>在途 KV 常驻 HBM 比例 = 50%（v1.6）</b>：本工具场景即 KV 卸载，不要求全部在途 KV 驻留 HBM——显存下限、TP×PP 网格可行性与 KV 水位均只按<b>一半在途 KV 常驻</b>（复制后 ×50%）核算，另一半常驻卸载设备、按页脚『写带宽×保留窗口 / 在途工作集』两口径另行计量。此比例写在代码常量 KVH 中。<br>
+    <b>KV 显存复制系数</b>：张量并行（TP）切分注意力时，每个 TP 秩至少持有 1 个 KV 头，TP 超过 KV 头数即产生整头复制（vLLM/SGLang 标准行为）；GQA 为 ⌈TP÷KV头数⌉ 份、MLA 的单条 latent 不切分、按 TP 份复制——显存需求与水位据此放大，卸载池仍存单份。<br>
+    <b>PD 双池口径（v1.9.10）</b>：每个实例各持<b>一份完整权重</b>（P、D 实例之间不共享，全系统权重 = 实例总数 × 单份，本例份数见明细"模型权重"行）——显存按每实例 1 份核算；吞吐取<b>保守锚</b>（prefill MFU 50%、decode 走 HBM 带宽口径），池间隔离后实际值有望更好，<b>实际 tps/λ 上限可优于本页结果</b>。<br>
+    <b>并行网格偏好</b>：TP ≤ <b>256 卡（1 个 NV 域）</b>、PP ≤ 8；域内跨节点 TP 属正常形态（NVLink 交换），超出 NV 域才警示并计入跨域 RDMA 代价；不搜索 EP/DP 拓扑（K3 类奇数层 MLA 模型可能因此给出偏大网格）。<br>
+    <b>上下文口径（v1.9.17）</b>：可选<b>单值</b>（全部请求同一长度）或<b>区间（正态分布）</b>——区间取 <b>μ=(最小+最大)/2、σ=(最大−最小)/6</b>（端点视为 μ∓3σ）；<b>单请求 KV 与写入带宽按 μ</b> 计，<b>prefill 计算量按 E[ctx²]=μ²+σ²</b> 计（注意力项对长度是二次的）。实际分布若偏长尾（非正态），请把最大值取到 P95~P99 再评估。<br>
+    <b>算力上限口径（v1.9.20）</b>：D 池带宽 / 显存上限都先按形状代价折算成<b>有效流</b>，再与 P 池折算的在途条数取 min——所以「算力上限 ÷ 单请求停留时间 = λ」恒成立（如 626 条 ÷ 51.2 s = 12.2 req/s），不会再出现“上限 641、λ 只能 11.1”的矛盾。<br>
+    <b>超节点拓扑与并行形状代价（v1.9.16，系数固定不可调）</b>：<b>1 个 NV 域 = 256 卡</b>（32 节点 × 8 卡；64 节点 = 2 个 NV 域，依次类推）；域内跨节点仍走 NVLink 交换，<b>跨域走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 约 2.25×）</b>。
+    <b>TP 上限 = 256 卡（= 1 个 NV 域、32 节点）</b>，同一实例尺寸会把 TP16×PP4 / TP32×PP2 / TP64×PP1 等多套合法并行都纳入比较。
+    <b>TP 代价</b>：ring 上跨机链路占比 f=2×跨机台数÷TP（每过一台机 2 条）；域内单跳 ≈1.11×、跨域单跳 ≈2.25×，得 all-reduce 耗时倍数，再按「通信占 prefill 的 35%」阻尼（MFU 50% 已含平均通信停顿）：<b>倍数 = 1 + 0.35×(耗时倍数−1)</b>。
+    <b>PP 代价</b>：流水气泡只对 ≥2 级生效，微批 M≈8 时每多一级 <b>×(1+1/8)</b>。
+    该代价用于：① 池内选形状；② P 有效供给 = 理想供给 ÷ 倍数、D 有效流 = 物理流 ÷ 倍数；③ 系统 λ 与 PD 配比推荐都按有效值比较。<b>注意</b>：TP 超过 KV 头数会导致 KV 复制系数 rep=⌈TP÷KV头数⌉ 增大（本例 TP64 时 rep=16，D 池显存可驻数因此降到 62 条）。<br>
+    <b>KV 水位阈值 70%</b>：超过即建议扩容或降压在途（工程经验阈值）。<br>
+    <b>容量单位口径</b>：本页面 GB/TB 均为 10⁹/10¹² 字节；厂商标称显存若按 GiB 计，结果偏保守约 7%。<br>
+    <b>索引器键缓存统一为 MQA 单键（v1.5）</b>：DSA/MSA 稀疏注意力的 index 键缓存按"拥有层 × 128 维单键"计（32/64 个 index 头是查询侧概念，不复制键；拥有层数取 config 的 indexer_types(full)/sparse_attention_freq/层列表），DeepSeek-V3.2 实测口径验证（61 层全索引 → 35,136+7,808=42,944 元素/token）。<b>MiMo-V2.6 为混合滑窗架构</b>：9(10) 全层 + 39(60) 个 128-token 窗口层，窗口缓存转每序列快照。<br>
+    <b>DeepSeek-V4 系 / Kimi-K3 按官方参考实现建模（v1.4）</b>：V4.1-1017 与 V4-Flash 的全局 KV 是<b>池化压缩</b>存储（每 1/ratio token 一条 512 维 latent：V4.1 → 2.5 条/token，V4-Flash → 5.41 条/token）；indexer 键缓存为源层共享的 128 维单键（非 32/64 头各存）；滑窗 128×512/层 FP8 按每序列常量计入明细。Kimi-K3/K3.1 为 <b>69 KDA 线性 + 24 MLA</b> 混合（循环态 116.2M 元素/序列，FP32）。结构口径与 kvcache.ai 计算器一致；其 890 B/token 为官方 FP4 载荷含量化 scale（本工具选 FP4 档 ≈ 862 B，+scale ≈ 890 B）。V4 系 prefill 二次项仍按稠密上界（DSA 实际为稀疏 topk 打分，TTFT 属保守值）。<br>
+    <b>精度默认随模型（v1.3）</b>：权重精度默认值取自模型原生发布精度（按 HF safetensors dtype 桶与 quantization_config 判定，见模型表"原生权重"列）；KV 默认：原生 FP8 或 FP4 → FP8，BF16 → BF16。混合精度检查点（FP8 注意力 + FP4 专家，如 V4 系 / Kimi / MiMo / M3.1）在 FP4 档按全体 0.5 B/参数计，较真值低估 FP8 注意力部分约 10～25%，需保守可手动切 FP8 档。<br>
+    <b>前缀去重率 = 0</b>：保守口径——每个请求独立存储自己的 KV，不依赖跨请求前缀共享收益。<br>
+    <b>线性注意力状态按 FP32</b>：混合模型的循环状态（如 Gated DeltaNet 的矩阵状态）对量化敏感，即使 KV 选了 FP8/INT4，该部分仍按 4 B/元素计。<br>
+    <b>Prefill 算力</b> <code>2×P_active×ctx + L_full×(d_model+d_kv)×ctx²</code>：一次项为全部激活参数的矩阵乘，二次项为全注意力层的 QKᵀV；<b>decode 算力</b> <code>2×P_active</code> FLOPs/token。<b>注意</b>：二次项为工程简化式（Q 侧宽度取 hidden、且不乘标准 2×MAC 因子），较教科书完整式约低 2×，TTFT 校核相应偏乐观。</p>
+    <h3>计算链</h3>
+    <p>每实例节点数 = ⌈(权重 + 在途×单请求KV) ÷ (GPU数×显存×90%)⌉，随后<b>沿节点数向上搜索最小合法并行网格</b>：TP（可跨节点）须同时整除注意力头数与 hidden 维，PP 须整除层数（vLLM/SGLang 均要求整除；TP 超过 KV 头数时 KV 头复制存放） → 实例数 = ⌊节点总数 ÷ 每实例节点数⌋；
+    到达率 = <b>有效并发</b> ÷ 单请求服务时长（有效并发 = min(<b>峰值并发（集群总）</b>, 集群上限)；<b>换模型 / 切换 PD / 改节点或卡数后，这个输入会自动对齐「算力上限」那条的值</b>（= 当前配比的能力上限）：**任何参数一改（模型、卡型、节点/卡数、精度、tps、上下文、TTFT、忙闲、寿命要求…）都会重置成这个值**，只有正在编辑该输入框本身时不重置；**把并发下调到全集群能力以下时，推荐配比只占「刚好够用」的节点，其余节点会标为闲置**；非 PD 的集群上限 = 实例数 × 每实例可持续流 ⌊min(服务时长÷prefill 时长, decode 聚合÷每流 tps)⌋；PD 的集群上限 = D 池可服务流 min(decode 算力, 显存可驻)；<b>非 PD 与 PD 统一按可持续口径</b>，需求超出上限只拉低并发、不虚增吞吐）。<b>在途/并发是需求参数</b>——由业务峰值并发请求数给定；硬件只决定<b>上限</b>（算力可持续在流、显存可驻在流、decode 可承载流），二者取 min 后才是实际在流。因此同一套硬件在不同业务峰值下给出不同容量（例：32 卡 PD 24/8，需求 10 → 585 TB，需求 40 → 941.5 TB，需求 ≥97 后饱和）；调「峰值并发请求数」是在改负载，不是在改硬件。写带宽 = 到达率×单请求KV；容量（双口径并列）= <b>保留窗口制</b>：写带宽×窗口×1.2（页面主 KPI，选型决策）｜ <b>在途工作集制</b>：在途实例×在途×单请求KV×1.2（明细行，不假设保留期）；显存足迹按 TP 复制系数放大（GQA：⌈TP/KV头⌉，MLA：TP）。</p>
+    <h3>模型库（14 款，点开看架构）</h3>
+    <details><summary>展开模型数据库</summary>
+      <table class="mdb" style="margin-top:6px"><thead><tr><th>模型</th><th>注意力架构</th><th>总参数</th><th>原生权重</th><th>激活参数</th><th>KV 元素/token（含索引）</th><th>态/窗 元素/序列</th><th>最大上下文</th></tr></thead><tbody id="mdb"></tbody></table>
+    </details>
+    <p style="margin-top:10px">架构参数自动解析自各模型 <a href="https://huggingface.co" target="_blank" rel="noopener">HuggingFace</a> config.json 与模型卡片（标注 ~ 的激活参数为按 config 估算）。本计算器为容量规划简化模型：不含多机通信、分桶批处理、KV 分页碎片、投机解码等因素；估算结果用于配置量级判断，采购前请以 POC 实测校准。</p>
+    <p style="margin-top:6px;font-size:12px;color:#9aa3b2">算法口径 = KV 卸载独立估算链 · 2026-11 · 单页无后端，数据不出浏览器<br>v1.9（2026-11-14）：新增闪存硬件 DWPD、忙/闲时段与负荷、磨损预计寿命与期待寿命反推保底容量（容量取 max 口径）；「硬件」更名为「计算节点」，闪存硬件卡片紧随其下；首屏以**容量需求 / KV 写带宽 / KV 读带宽**三大 KPI 突出呈现，实例数、每实例节点数、单 token KV 降为小字条。
+        v1.9.3（2026-11-18）：自查修复——推荐配比的 D 侧供给与主算法对齐（「声称 λ」不再高于应用后真值）、推荐改按实例数枚举以消除取整浪费、PD 模式下明细/页脚推导/水位告警改用双池数据、非法配比（P/D=0 或 P+D>总节点）显示「–」并给出具体原因、跨零点班次告警。<br>
+        v1.8（2026-11-14）：硬件区新增 GPU 型号下拉（默认「自定义」：FP8 稠密 1.4 PF / 144 GB；v1.9.2 起由 1.2 上调）；默认勾选 PD 分离（14 款，2026-11 联网核实规格：NVIDIA A/H/B 系＋摩尔线程 S4000/S5000＋海光 BW1000/BW1100），按权重精度自动填 FP8/BF16 稠密档与 HBM，保留自定义手动输入。
+        v1.7（2026-11-14）：与外部文档解耦——移除基线预设按钮，工作集口径更名为中性的'在途工作集'；v1.1–v1.6 修订历史见仓库 git log。</p>
+  </div>
+</div>
+
+<script>
+const MODELS = [{"n": "DeepSeek-V4-Flash", "id": "deepseek-ai/DeepSeek-V4-Flash", "cls": "mla", "L": 43, "Lf": 43, "Ll": 0, "nq": 64, "nkv": 1, "et": 2768, "es": 0, "idx": 672, "dkv": 576, "W": 290.9, "P": 17.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 3014656, "wsB": 1, "dm": 4096, "td": 64.4, "ctx": 1048576, "note": "官方交错池化：21 层 ratio=4 + 20 层 ratio=128 → 5.406 条×512/token；indexer 仅 r4 层 21 份×128；46 层滑窗 128×512（含 3 MTP，FP8）"}, {"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 1280, "es": 0, "idx": 320, "dkv": 576, "W": 763.2, "P": 20.8, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 2818048, "wsB": 1, "dm": 5120, "td": 32.0, "ctx": 1048576, "note": "官方共享池：KV 仅 4 源层按 1/2、1/2、1/2、1 池化 → 2.5 条×512/token；indexer 4 份×128 维共享；43 层滑窗 128×512（含 3 draft，FP8）"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "fp8", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "dkv": 1024, "W": 298.8, "P": 21, "Pe": false, "psrc": "模型卡 295B/A21B", "wdt": "bf16", "kvh": 8, "esB": 4, "ws": 0, "wsB": 1, "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 780.0, "P": 49, "Pe": false, "psrc": "模型卡 770B/A49B", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2779.9, "P": 104, "Pe": false, "psrc": "模型卡 Activated 104B", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "KDA 混合：24 MLA 全注意力(576/token)+69 KDA 线性（每层循环态 96×128×128+conv，共 116.2M 元素/序列，FP32）"}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2780.1, "P": 104, "Pe": false, "psrc": "模型卡（同 K3）", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "同 Kimi-K3（KDA 混合 24+69）"}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 11520, "es": 0, "idx": 0, "dkv": 768, "W": 310.8, "P": 16.0, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 12779520, "wsB": 0, "dm": 4096, "td": 240.0, "ctx": 1048576, "note": "混合滑窗 GQA：9 全层 + 39 窗口层(128×8头，每序列快照)"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 25600, "es": 0, "idx": 0, "dkv": 1536, "W": 1024.2, "P": 42.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 8, "esB": 4, "ws": 19660800, "wsB": 0, "dm": 6144, "td": 365.7, "ctx": 1048576, "note": "混合滑窗 GQA：10 全层 + 60 窗口层(128×8头，每序列快照)"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7296, "dkv": 512, "W": 427.0, "P": 23, "Pe": false, "psrc": "模型卡 ~428B/A23B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7680, "dkv": 512, "W": 220.5, "P": 12, "Pe": true, "psrc": "按 M3 比例估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "dkv": 1024, "W": 2446.2, "P": 95, "Pe": false, "psrc": "模型卡 A95B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性"}, {"n": "Qwen3.8-27B", "id": "Qwen/Qwen3.8-27B", "cls": "hybrid", "L": 64, "Lf": 16, "Ll": 48, "nq": 24, "nkv": 4, "et": 32768, "es": 38928384, "idx": 0, "dkv": 1024, "W": 27.8, "P": 27.3, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 5120, "td": 2048.0, "ctx": 262144, "note": "混合：16 全注意力 + 48 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 384, "dkv": 512, "W": 180.0, "P": 6, "Pe": false, "psrc": "模型卡 125B/A6B", "wdt": "bf16", "kvh": 2, "esB": 4, "ws": 0, "wsB": 1, "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}];
+
+const $ = id => document.getElementById(id);
+// —— 并行形状代价：按 NVLink 带宽标定（写死在固定假设里，界面不可调）——
+// NVLink5：每卡 900 GB/s/向（1.8 TB/s 双向）；NVL72 单域 72 卡、域内聚合 130 TB/s
+// 域内跨 tray 仍走 NVLink（带宽不变，只多 1 跳 ≈1–2 µs + 交换机拥塞）→ 每跨 1 台机 +3%
+// 跨出 NV 域改走 3.2 Tbps RDMA（≈400 GB/s，对 NVLink 900 GB/s/向 ≈2.25×）
+
+// PP：微批 M≈8 时流水效率 = M/(M+PP−1) → 每加 1 级 ≈ 1/M ≈ +12%
+// —— 超节点拓扑假设：1 个 NV 域 = 256 卡（32 节点 × 8 卡）；域内跨节点仍走 NVLink 交换，跨域走 3.2 Tbps RDMA ——
+const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
+// 通信在 prefill 时长中的占比：MFU=50% 已含平均通信/停顿，这里只叠加「形状差异」那部分，避免重复计入
+const COMM_SHARE=0.35;
+// 域大小按超节点拓扑固定为 256 卡（与 GPU 型号无关）：域内跨节点走 NVLink 交换，跨域走 RDMA
+function nvDomain(){ return NV_DOMAIN_GPUS; }                       // 卡数：1 个 NV 域 256 卡
+function nvDomainNodes(g){ return Math.max(1, Math.floor(NV_DOMAIN_GPUS/Math.max(1,g))); }   // 域内节点数（8 卡/节点 → 32）
+const sel = $("model");
+MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n+(m.cls==="hybrid"?"（混合线性）":m.cls==="mla"?"（MLA）":"（GQA）");sel.appendChild(o);});
+sel.value = MODELS.findIndex(m=>m.n==="Qwen3.8-2.4T-A95B");
+const WDT_LBL={bf16:"BF16",fp8:"FP8",nvfp4:"NVFP4/FP4"};
+// —— 算力档位标识：FP8 稠密 / BF16 稠密（切换模型或权重精度时自动换算为对应档的数值）——
+let PFB="fp8";                                            // 当前算力数字所属档位
+const pfTarget = () => {
+  const x=(typeof GPUS!=="undefined") ? GPUS[+$("gpu").value] : null;
+  if($("bw").value==="1"){                       // 权重 FP8
+    if(!x || x[3]==null) return "fp8";           // 自定义/无型号 → 按 FP8
+    return x[1]!=null ? "fp8" : "int8";          // 型号有 FP8 用 FP8；无 FP8（Ampere 等）用 INT8 等效
+  }
+  return "bf16";                                  // BF16 权重 / INT4-weight-only（反量化后按 BF16）
+};
+function pfBasisLabel(){
+  return PFB==="fp8" ? "FP8 稠密" : PFB==="int8" ? "INT8 稠密（等效 FP8）" : "BF16 稠密";
+}   // INT4/NVFP4 的「反量化后按 BF16 执行」说明见下方提示语
+function showPfBadge(){ const b=$("pfbadge"); if(b) b.textContent=pfBasisLabel(); }
+function syncPf(){
+  const t=pfTarget();
+  if(t===PFB){ showPfBadge(); return; }
+  const x=(typeof GPUS!=="undefined") ? GPUS[+$("gpu").value] : null;
+  let v=+$("pf").value||1;
+  if(x && x[3]!=null) v = (t==="fp8" ? x[1] : t==="int8" ? 2*x[2] : x[2]);   // 型号对应档（INT8 稠密按 2×BF16 稠密折算）
+  else v = (t==="fp8" ? v*2 : v/2);                                          // 自定义 → 2:1
+  PFB=t; $("pf").value=+(+v).toFixed(2); showPfBadge();
+}
+function applyModelDefaults(){ const m=MODELS[+sel.value];
+  $("bw").value = m.wdt==="bf16" ? "2" : m.wdt==="fp8" ? "1" : "0.5";
+  $("bk").value = m.wdt==="bf16" ? "2" : "1"; }   // 用户规则：FP8/FP4 权重 → KV FP8；否则 BF16
+sel.addEventListener("change",()=>{ applyModelDefaults(); syncPf(); inflUserEdited=false; pdUserEdited=false; autoDemand(true); snapInfl(); });   // 换模型：重算 PD 部署 + 并发默认值
+applyModelDefaults();   // 初始状态 = 默认模型的原生精度，与「切走再切回」完全一致
+showPfBadge();
+
+let LAST_CAP=0;        // 当前配比的在途上限（供显示/局部用）
+let LAST_CAP_FULL=0;   // 全集群最大在途能力（不受当前配比是否收缩影响）——默认并发按它重置
+const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, KVH=0.5, DWPD_YEARS=5;   // DWPD 的保修期基准（年）   // KVH：在途 KV 需常驻 HBM 的比例（其余在卸载设备，见页脚）
+const humanGB=g=>g>=1000?(g/1000).toLocaleString("zh",{maximumFractionDigits:2})+" TB":g>=1?g.toLocaleString("zh",{maximumFractionDigits:2})+" GB":(g*1000).toLocaleString("zh",{maximumFractionDigits:1})+" MB";
+
+// —— 布局工具：合法并行网格 / 单池规划（P 按吞吐、D 按并发）——
+const GCACHE=new Map();
+function legalGrids(m,g,s){
+  const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
+  // TP 上限 = 1 个 NV 域（256 卡）；同时至少允许 2 台机（max(16,g)）
+  const kvHeads=m.kvh||(m.cls==="mla"?1:Math.max(1,m.nkv||1)), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
+  for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:Math.max(1,Math.ceil(t/kvHeads))}); }
+  if(!out.length) return out;
+  const pref=out.filter(x=>x.tp<=tpMax), pool=(pref.length?pref:out.slice());
+  pool.sort((a,b)=>{const xa=a.tp<=g,xb=b.tp<=g; if(xa!==xb)return xa?-1:1; return xa?b.tp-a.tp:a.tp-b.tp;});
+  const ppOk=pool.filter(x=>x.pp<=8);
+  const res=ppOk.concat(pool.filter(x=>!ppOk.includes(x)));
+  GCACHE.set(key,res); return res;
+}
+// —— 给定预算 b 的池规划（只枚举「有合法并行网格」的实例粒度）——
+function legalList(m,g,maxS){
+  const key=m.n+"|"+g+"|L"+maxS; const hit=GCACHE.get(key); if(hit) return hit;
+  const out=[];
+  // 同一实例尺寸可有多套合法并行（如 TP16×PP4 / TP32×PP2 / TP64×PP1），都纳入比较，由形状代价选优
+  for(let s=1;s<=maxS;s++){ const gs=legalGrids(m,g,s); if(!gs.length) continue;
+    gs.slice(0, s<=64?3:1).forEach(g0=>out.push({s,g0})); }   // 小实例（≤64 节点）才展开多套并行，控住大集群开销
+  GCACHE.set(key,out); return out;
+}
+function dAt(m,g,hbm,pf,tps,S,W,b,C,legal,bwH,A_GB){   // D 池：可服务并发流（HBM 带宽口径）
+  const budNode=g*hbm*UTIL; let best=null;
+  for(const it of legal){ if(it.s>b) break;
+    const s=it.s, k=Math.floor(b/s), used=k*s, perInst=C/Math.max(1,k);
+    const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH);   // 每实例可承载流（带宽+激活权重）
+    const memMax=Math.floor((used*budNode - k*W)/(it.g0.rep*Math.max(1e-9,S)*KVH));
+    const streams=Math.max(0,Math.min(C, capS*k, memMax));
+    const fac=shapeFactor(it.g0.tp,it.g0.pp,g), eff=streams/fac;   // decode 逐 token 受气泡/跨机拖累
+    const rank=[eff, ppOK(it.g0), -s];                   // 形状修正后可服务流 > PP≤8 > 实例更小
+    if(!best||rankCmp(rank,best.rank)>0) best={s,k,used,perInst,g:it.g0,streams,capS,memMax,fac,eff,rank};
+  }
+  return best;
+}
+// decode 带宽口径：每一步都要读「激活权重」一遍 + 各流在驻 KV 各一遍；
+// 给定目标 tps 时，能同时服务的流数 = (卡数×单卡带宽÷tps − 激活权重字节) ÷ (每流在驻 KV)
+function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH){
+  const budgetGB = cards*bwH*1000/tps;          // 每 token-step 可搬运的 GB 数
+  const room = budgetGB - activeW_GB;           // 扣掉激活权重后留给 KV 的预算
+  const perStream = rep*S_GB*KVH;               // 每流每步要读的在驻 KV（含 TP 复制、50% 常驻）
+  if(!(perStream>0) || room<=0) return 0;
+  return Math.max(0, Math.floor(room/perStream));
+}
+// 形状代价：跨机 TP 的 all-reduce + PP 流水气泡，乘在「理想 prefill 时长」上，用于比较不同并行形状
+function shapeFactor(tp, pp, g){
+  const hops=Math.max(0, Math.ceil(tp/g)-1);               // TP 跨了几台机（机内 TP 记 0）
+  const domNodes=nvDomainNodes(g);                          // 一个 NV 域覆盖多少台机（256/8 = 32）
+  const hopsIn=Math.min(hops, Math.max(0,domNodes-1));      // 域内跨机（仍走 NVLink 交换）
+  const hopsOut=Math.max(0, hops-(domNodes-1));             // 跨出 NV 域（走 3.2 Tbps RDMA）
+  const fIn=Math.min(0.5, 2*hopsIn/Math.max(2,tp)), fOut=Math.min(0.5, 2*hopsOut/Math.max(2,tp));
+  const rIn=1/NV_LINK_EFF, rOut=NV_BW/RDMA_BW;              // 单跳耗时倍数：域内 ≈1.11；跨域 900/(3.2Tbps=400GB/s)=2.25
+  const tpFac=(1-fIn-fOut)+fIn*rIn+fOut*rOut;               // all-reduce 耗时的相对倍数
+  const tpEff=1+COMM_SHARE*(tpFac-1);                       // 只让通信占比那部分放大 prefill 时长
+  return tpEff*(1+PP_PEN*Math.max(0,pp-1));                 // × PP 流水气泡（PP=1 无气泡；每多一级 +1/8）
+}
+function rankCmp(a,b){ for(let i=0;i<a.length;i++){ if(Math.abs(a[i]-b[i])>1e-12) return a[i]-b[i]; } return 0; }
+// 部署形状优先：实例内 TP（TP≤每节点 GPU）+ PP≤8 才是可上线的形状；跨机 TP / 深流水只在没得选时才用
+function ppOK(g0){ return g0.pp<=8 ? 1 : 0; }      // PP>8 深度流水：不现实，必须优先避开
+function tpInNode(g0,g){ return g0.tp<=g ? 1 : 0; } // TP 跨机只是弱偏好（真实部署常见 2 节点 TP）
+function supplyAt(m,g,hbm,pf,fl,b,nodes,legal,ttftMs,W){    // P 池：prefill 供给 req/s
+  const budNode=g*hbm*UTIL, cand=[];
+  for(const it of legal){ if(it.s>b) break;
+    const s=it.s; if(W > s*budNode) continue;            // 每个实例必须装得下一份权重，否则不可部署
+    const k=Math.floor(b/s), used=k*s;
+    cand.push({s,k,used,g:it.g0,supply:used*g*pf*1e15*MFU/fl,Tpf:fl/(s*g*pf*1e15*MFU)});
+  }
+  if(!cand.length) return null;
+  const maxUsed=Math.max(...cand.map(o=>o.used));
+  // 吞吐优先但留 5% 余量：同档内先满足 TTFT，再取 prefill 更快（实例更大）、PP≤8、机内 TP
+  let best=null;
+  for(const o of cand){
+    const fac=shapeFactor(o.g.tp, o.g.pp, g);
+    const tpfEff=o.Tpf*fac;                       // 形状修正后的有效 prefill 时长
+    const ttftOK=(!ttftMs||tpfEff*1000<=ttftMs)?1:0;
+    const rank=[o.used>=maxUsed*0.95?1:0, ppOK(o.g), ttftOK, -tpfEff, -o.Tpf, tpInNode(o.g,g)];
+    if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o,{fac,tpfEff,supplyEff:o.supply/fac});
+  }
+  return best;
+}
+// 为什么「0 个可承载实例」：区分「没有合法并行网格」与「最小合法实例装不下权重」
+function whyNoInst(m,g,hbm,W,nodes){
+  const budNode=g*hbm*UTIL, lg=legalList(m,g,nodes);
+  const bud=sz=>sz*budNode;
+  if(!lg.length) return "当前「单节点 GPU 数」下不存在合法并行网格（TP 需整除头数 "+m.nq+" 与维度 "+m.dm+"，PP 需整除 "+m.L+" 层）——建议把每节点 GPU 数改为 8 再试";
+  const sizes=[...new Set(lg.map(x=>x.s))].sort((a,b)=>a-b);
+  const fit=sizes.find(sz=>W<=bud(sz));
+  if(fit) return "存在 "+fit+" 节点合法实例（"+humanGB(bud(fit))+"），但装不下权重 "+humanGB(W)+" + 在途 KV 的复制 → 需增加节点或降低在途并发";
+  const maxS=sizes[sizes.length-1];
+  let nextS=0; for(let sz=nodes+1;sz<=nodes+64;sz++){ if(legalGrids(m,g,sz).length){ nextS=sz; break; } }
+  return "当前每节点 "+g+" 卡时，合法实例尺寸只有 "+sizes.join(" / ")+" 节点；其中最大 "+maxS+" 节点可用 "+humanGB(bud(maxS))+" < 权重 "+humanGB(W)+
+         (nextS? "，再下一档合法尺寸是 "+nextS+" 节点（把节点数加到 "+nextS+" 即可）" : "")+
+         " → 另一条路：把「单节点 GPU 数」改成 8（8 节点=64 卡实例可用 8.29 TB，能装下该权重）";
+}
+// 非 PD 单池：既做 prefill 又做 decode；取「能容纳该并发分摊的最小实例粒度」（多实例、小爆炸半径）
+function singlePlan(m,g,hbm,pf,fl,tps,nout,S,W,nodes,C,bwH,A_GB){
+  const budNode=g*hbm*UTIL;
+  for(const it of legalList(m,g,nodes)){
+    const s=it.s, g0=it.g0;
+    const k=Math.floor(nodes/s); if(k<1) continue;
+    const perInst=C/Math.max(1,k);
+    if(W + g0.rep*perInst*S*KVH > s*budNode) continue;         // 每实例显存须容得下分摊并发
+    const Tpf=fl/(s*g*pf*1e15*MFU), Tsvc=Tpf+nout/tps;
+    const capS=decStreamsCap(s*g, A_GB, g0.rep, S, tps, bwH);      // 每实例可承载流（HBM 带宽口径）
+    const fac=shapeFactor(g0.tp, g0.pp, g);
+    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)/fac));   // 形状代价折掉有效流
+    return {s,k,used:k*s,perInst,g:g0,Tpf,Tsvc,inflMax,capS,streams:Math.min(C,k*inflMax)};
+  }
+  return null;
+}
+// —— PD 配比推荐：给定总并发 C，D 只需够服务 C，其余节点给 P（λ=min(D 并发、P 供给) 最大）——
+// 推荐配比必须与「按该配比重算」一致：supplyAt/dAt 返回实际用到 used，迭代到不动点
+function stabilizeSplit(nP0,nD0,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs){
+  let nP=nP0, nD=nD0;
+  for(let i=0;i<8;i++){
+    const pP=supplyAt(m,g,hbm,pf,fl,Math.max(1,nP),nodes,legal,ttftMs,W);
+    const dP=dAt(m,g,hbm,pf,tps,S,W,Math.max(1,nD),C,legal,bwH,A_GB);
+    if(!pP||!dP||pP.supply<=0||dP.streams<=0) return null;
+    const nP2=pP.used, nD2=dP.used;
+    if(nP2===nP && nD2===nD) return {nP,nD,pP,dP};
+    nP=nP2; nD=nD2;
+  }
+  return null;
+}
+function pdBestSplit(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
+  const C=Math.max(1,Math.round(+$("inflight").value||40));
+  const bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
+  const W=m.W*bwv, tps=Math.max(0.5,+$("tps").value||80), ttftMs=Math.max(1,+$("ttft").value||500);
+  const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
+  const nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
+  let best=null, minD=0, minN=0;
+  for(let nD=1;nD<nodes;nD++){
+    const nP=nodes-nD;
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB), pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
+    if(!dP||!pP) continue;
+    if(dP.streams>0 && !minD) minD=nD;
+    if(dP.streams>0 && pP.supply>0 && (!minN||pP.used+dP.used<minN)) minN=pP.used+dP.used;
+    if(dP.streams<=0||pP.supply<=0) continue;
+    const dwellL=nout/tps, facL=Math.max(1,dP.fac||1);
+    const capAllL=Math.min(Math.max(1,Math.floor(pP.supplyEff*dwellL)), Math.max(1,Math.floor(dP.capS*dP.k/facL)), Math.max(1,Math.floor(dP.memMax*dP.k/facL)));
+    const l=Math.min(pP.supplyEff, Math.min(C,capAllL)/dwellL);   // 需求与能力取 min，再折算成到达率
+    const usedSum=pP.used+dP.used, waste=(nP-pP.used)+(nD-dP.used);
+    if(!best){ best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s}; continue; }
+    const tie=Math.abs(l-best.l)<=1e-12;
+    if(l>best.l+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&waste<best.waste) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&nD<best.nD))
+      best={nP:pP.used,nD:dP.used,l,used:pP.used+dP.used,usedSum,waste,pEff:pP.supplyEff,pInst:pP.k,dInst:dP.k,sP:pP.s,sD:dP.s};
+  }
+  if(!best||best.l<=1e-9) return {best:null,minD,minN};
+  // —— 全集群最大能力（需求不受限，用全部节点）：给默认并发重置与「是否该收缩」做基准 ——
+  {
+    let fullBest=null;
+    for(let nD=1;nD<nodes;nD++){
+      const nP=nodes-nD;
+      const dP=dAt(m,g,hbm,pf,tps,S,W,nD,1e9,legal,bwH,A_GB);
+      const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
+      if(!dP||!pP||pP.supply<=0||dP.streams<=0) continue;
+      const dwellL=nout/tps, facL=Math.max(1,dP.fac||1);
+      const capAllL=Math.min(Math.max(1,Math.floor(pP.supplyEff*dwellL)), Math.max(1,Math.floor(dP.capS*dP.k/facL)), Math.max(1,Math.floor(dP.memMax*dP.k/facL)));
+      const l=Math.min(pP.supplyEff, capAllL/dwellL);
+      if(!fullBest||l>fullBest.l) fullBest={l,dP,pP,capAllL};
+    }
+    if(fullBest) LAST_CAP_FULL=fullBest.capAllL;
+  }
+  // —— 需求导向：若「刚好满足当前需求」所需的节点数少于总节点，就只分配这么多，其余显式闲置 ——
+  {
+    let dMin=0,dBest=null;
+    for(let nD=1;nD<nodes;nD++){
+      const dP=dAt(m,g,hbm,pf,tps,S,W,nD,C,legal,bwH,A_GB);
+      if(dP&&dP.eff>=C*0.99&&dP.memMax>=C&&dP.capS*dP.k>=C){ dMin=nD; dBest=dP; break; }   // 有效流也要够（形状代价后仍能顶住需求）
+    }
+    if(dMin && C<LAST_CAP_FULL*0.99){   // 只有把并发下调到「全集群能力」以下时才收缩节点
+      let pMin=0,pBest=null;
+      for(let nP=1;nP<=nodes-dMin;nP++){
+        const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W);
+        if(pP&&pP.supplyEff*nout/tps>=C*0.99){ pMin=pP.used; pBest=pP; break; }
+      }
+      if(pMin){
+        const T=pMin+dMin, pCap=Math.floor(pBest.supplyEff*nout/tps);
+        const facS=Math.max(1,dBest.fac||1);
+        const capAll=Math.min(Math.max(1,pCap), Math.max(1,Math.floor(dBest.capS*dBest.k/facS)), Math.max(1,Math.floor(dBest.memMax*dBest.k/facS)));
+        if(T<=nodes && capAll>=C*0.99){
+          best={nP:pMin,nD:dMin,l:Math.min(dBest.eff*tps/nout,pBest.supplyEff),used:T,usedSum:T,waste:0,
+                pEff:pBest.supplyEff,pInst:pBest.k,dInst:dBest.k,sP:pBest.s,sD:dBest.s};
+        }
+      }
+    }
+  }
+  { const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,C,ttftMs);
+    if(st){ const dw=nout/tps, fc=Math.max(1,st.dP.fac||1);
+      const capA=Math.min(Math.max(1,Math.floor(st.pP.supplyEff*dw)), Math.max(1,Math.floor(st.dP.capS*st.dP.k/fc)), Math.max(1,Math.floor(st.dP.memMax*st.dP.k/fc)));
+      best.nP=st.nP; best.nD=st.nD; best.l=Math.min(st.pP.supplyEff, Math.min(C,capA)/dw); best.pInst=st.pP.k; best.dInst=st.dP.k; best.sP=st.pP.s; best.sD=st.dP.s; } }
+  return {best,minD,minN};
+}
+// —— 默认并发反解：取「P 池打满所需并发 = 供给×输出长÷tps」且 D 池能服务的自洽点 ——
+function bestUtilSplit(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
+  const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
+  const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,nodes);
+  const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
+  const ttftMs=Math.max(1,+$("ttft").value||500);
+  let best=null, minN=0;
+  for(let nD=1;nD<nodes;nD++){
+    const nP=nodes-nD;
+    const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W); if(!pP||pP.supply<=0) continue;
+    const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条       // 打满 P 所需并发（物理口径）
+    const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP||dP.eff<=0) continue;
+    const C=Math.max(1,Math.min(Creq, dP.streams, Math.floor(pP.supplyEff*nout/tps))), lam=Math.min(C*tps/nout/dP.fac, pP.supplyEff);
+    const usedSum=pP.used+dP.used, gap=Math.abs(Creq-dP.streams), waste=(nP-pP.used)+(nD-dP.used);
+    if(!minN||pP.used+dP.used<minN) minN=pP.used+dP.used;
+    if(!best){ best={nP:pP.used,nD:dP.used,C,lam,gap,usedSum,waste,pEff:pP.supplyEff}; continue; }
+    const tie=Math.abs(lam-best.lam)<=1e-12;
+    if(lam>best.lam+1e-12 || (tie&&usedSum>best.usedSum) || (tie&&usedSum===best.usedSum&&waste<best.waste) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&pP.supplyEff>best.pEff+1e-12) ||
+       (tie&&usedSum===best.usedSum&&waste===best.waste&&Math.abs(pP.supplyEff-best.pEff)<=1e-12&&gap<best.gap))
+      best={nP:pP.used,nD:dP.used,C,lam,gap,usedSum,waste,pEff:pP.supplyEff};
+  }
+  if(best){
+    const st=stabilizeSplit(best.nP,best.nD,m,g,hbm,pf,fl,tps,nout,S,W,nodes,legal,bwH,A_GB,Math.max(1,Math.round(+$("inflight").value||40)),ttftMs);
+    if(st){ const C2=Math.max(1,Math.min(Math.floor(st.pP.supply*nout/tps), st.dP.streams, Math.floor(st.pP.supplyEff*nout/tps)));
+      best.nP=st.nP; best.nD=st.nD; best.C=C2; best.lam=Math.min(C2*tps/nout/st.dP.fac, st.pP.supplyEff); }
+  }
+  return {best,minN};
+}
+// 非 PD：并发默认取「集群可持续上限」（实例数 × 每实例可持续流）
+function bestSingleCap(){
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
+  const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
+  const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), budNode=g*hbm*UTIL;
+  const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
+  let best=null;
+  for(const it of legalList(m,g,nodes)){
+    const s=it.s, k=Math.floor(nodes/s); if(k<1) continue;
+    const Tpf=fl/(s*g*pf*1e15*MFU), Tsvc=Tpf+nout/tps;
+    const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH);
+    const fac=shapeFactor(it.g0.tp, it.g0.pp, g);
+    const inflMax=Math.max(1,Math.floor(Math.min(Tsvc/Tpf, capS)/fac));   // 形状代价折掉一部分可持续流
+    const C=k*inflMax;
+    if(W + it.g0.rep*(C/k)*S*KVH > s*budNode) continue;
+    const lam=C/Tsvc;
+    if(!best||lam>best.lam+1e-12) best={s,k,C,lam};
+  }
+  return best;
+}
+let pdUserEdited=false, inflUserEdited=false;   // 用户手动改过 P/D 配比后，推荐不再自动覆盖（可点按钮重新委托）
+function applyPDBalance(force){
+  const b=pdBestSplit();
+  const curP=+$("pnodes").value||0, curD=+$("dnodes").value||0;
+  if(b.best && (force || (curP===0&&curD===0) || (!pdUserEdited && (curP!==b.best.nP||curD!==b.best.nD)))){
+    $("pnodes").value=b.best.nP; $("dnodes").value=b.best.nD;
+  }else if(!b.best && force){
+    $("pnodes").value=0; $("dnodes").value=0;   // 用户主动点推荐且确实无解：清零，说明行给出原因
+  }
+  calc();
+}
+// —— PD 配比行的「闲置 / 超出」实时合计 ——
+function updPDIdle(nP,nD,nodes){
+  const el=$("pdidle"); if(!el) return;
+  if(!$("pd").checked){ el.style.display="none"; el.innerHTML=""; return; }
+  el.style.display="";
+  const idle=nodes-nP-nD;
+  el.title="总节点 "+nodes+" = P "+nP+" + D "+nD+" + 闲置 "+Math.max(0,idle);
+  if(idle>0) el.innerHTML='<b style="color:var(--bad)">闲置 '+idle+'</b>';
+  else if(idle===0) el.innerHTML='闲置 <b>'+idle+'</b>';
+  else el.innerHTML='<b style="color:var(--bad)">超出 '+(-idle)+'</b>';
+}
+// —— 上下文口径：单值 / 区间（正态分布，min/max 视为 μ∓3σ）——
+function ctxStats(){
+  const dist = $("ctxmode").value==="dist";
+  if(!dist){ const c=Math.max(1,Math.round(+$("ctx").value||65536)); return {mean:c, sq:c*c, dist:false, min:c, max:c, sd:0}; }
+  let lo=Math.max(1,Math.round(+$("ctxmin").value||1)), hi=Math.max(1,Math.round(+$("ctxmax").value||1));
+  if(hi<lo){ const t=lo; lo=hi; hi=t; }
+  const mean=(lo+hi)/2, sd=(hi-lo)/6;                 // 区间端点 ≈ μ∓3σ
+  return {mean, sq:mean*mean+sd*sd, dist:true, min:lo, max:hi, sd};
+}
+function calc(){
+  // —— 输入解析与守卫（P2-2）——
+  const num=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>0?v:d;};
+  if(!$("pd").checked) updPDIdle(0,0,0);
+  const m=MODELS[+sel.value], pf=Math.max(0.05,num("pf",2)), hbm=Math.max(1,num("hbm",144)),
+        g=Math.max(1,Math.round(num("g",8))), nodes=Math.max(1,Math.round(num("nodes",32))),
+        bw=+$("bw").value||1, bk=+$("bk").value||2, bwH=Math.max(0.1,num("hbmbw",3.35)),
+        pd=$("pd").checked,
+        infl=Math.max(1,Math.round(num("inflight",40))), ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq,
+        nout=Math.max(1,Math.round(num("nout",512))), tps=Math.max(0.5,num("tps",80)),
+        ttft=Math.max(1,num("ttft",500)), th=Math.max(0.01,num("thold",2)),
+        n0=(id,d)=>{const v=+$(id).value; return isFinite(v)&&v>=0?v:d;},
+        dw=Math.max(0.01,num("dwpd",1)),
+        elife=(()=>{const s=$("elife").value.trim(), v=parseFloat(s); return (s!==""&&isFinite(v)&&v>0)?Math.max(0.1,v):null;})(),
+        riskY=(elife===null?3:elife),
+        bs=n0("bstart",8), be=n0("bend",18), bfr=Math.min(100,n0("bload",100))/100, ifr=Math.min(100,n0("iload",20))/100;
+
+  $("ctxhint").innerHTML = ctxI.dist
+     ? ("正态口径：μ="+ctx.toLocaleString()+"、σ="+(ctxI.sd||0).toLocaleString("zh",{maximumFractionDigits:0})+"（区间端点按 μ∓3σ）；单请求 KV/带宽按 μ 计，prefill 计算量按 <b>E[ctx²]=μ²+σ²</b> 计 → 等效 "+(Math.sqrt(ctx2)).toFixed(0)+" tok")
+     : ("单值口径：按 "+ctx.toLocaleString()+" 估算（等价于所有请求同一长度）");
+  $("mnote").textContent = m.note+" · 最大上下文 "+(m.ctx?m.ctx.toLocaleString():"–")+" · 激活参数 "+(m.Pe?"~":"")+m.P+"B（"+m.psrc+"） · 原生权重 "+(WDT_LBL[m.wdt]||m.wdt);
+  { const basisTxt = pfBasisLabel(), custom = (+$("gpu").value===0);
+    $("pfhint").textContent = "单位 PF（1000 TFLOPS/卡）· 权重精度 → 「"+basisTxt+"」算力 —— "
+      + (custom
+          ? (PFB==="fp8" ? "显示 FP8 稠密峰值（H100/H200 ≈ 2.0 PF，即标称 1979 TFLOPS 的稠密值）"
+                         : "已把 FP8 稠密峰值自动 ÷2 折算显示（H100：FP8 1.98 → BF16 0.99 PF）")
+          : (PFB==="int8" ? "该型号无 FP8 Tensor 核心，已按同级 INT8 稠密折算（= 2×BF16 稠密）等效 FP8 权重"
+                          : "已按所选型号 × 权重精度自动取该档标称值"))
+      + (bw===0.5 ? "；INT4/NVFP4 属 weight-only，反量化后由 BF16 矩阵乘执行，故归入 BF16 档" : ""); }
+
+  // —— KV：主 KV + DSA 索引（每 token，随 KV 精度）+ 线性状态（每序列，FP32）——
+  const sTokB=(m.et+(m.idx||0))*bk, stateB=(m.es||0)*(m.esB||4)+(m.ws||0)*(m.wsB===0?bk:1);
+  const S_GB=(sTokB*ctx+stateB)/1e9;
+  const W_GB=m.W*bw, Weff=W_GB, budNode=g*hbm*UTIL;
+  const A_GB=m.P*bw;            // decode 每步必读的「激活权重」（MoE 只读激活专家；稠密模型即全部权重）   // Weff = 每实例权重（单份）；全系统份数 = 实例总数（P、D 实例不共享权重）
+
+  // —— 布局：以「集群总并发 C」为需求。非 PD 单池；PD 两池（P 按吞吐、D 按并发）——
+  const fl = 2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
+  const sp = pd ? null : singlePlan(m,g,hbm,pf,fl,tps,nout,S_GB,Weff,nodes,infl,bwH,A_GB);
+  let nInst=0, grid=null, rep=1, inst=0, perInst=0, Ceff=0, lamInst=0;
+  if(sp){ nInst=sp.s; grid=[sp.g.tp,sp.g.pp]; rep=sp.g.rep; inst=sp.k; perInst=sp.perInst; Ceff=sp.streams; }
+  let Tpf = sp?sp.Tpf:0, Tsvc = sp?sp.Tsvc:0;
+  let pdP=null, pdD=null, lam=0;
+  const decCapI = sp ? decStreamsCap(nInst*g, A_GB, rep, S_GB, tps, bwH) : 0;   // 非 PD：每实例 decode 可承载流
+  const pdRec = pd ? pdBestSplit() : null;
+  if(pd){
+    const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    updPDIdle(nP,nD,nodes);
+    const lg = legalList(m,g,Math.max(nP,nD));
+    const pPl = nP>0 ? supplyAt(m,g,hbm,pf,fl,nP,nodes,lg,Math.max(1,+$("ttft").value||500),Weff) : null;
+    const dPl = nD>0 ? dAt(m,g,hbm,pf,tps,S_GB,Weff,nD,infl,lg,bwH,A_GB) : null;
+    if(pPl&&dPl){
+      const TpfP = fl/(pPl.s*g*pf*1e15*MFU);
+      Tpf = TpfP; Tsvc = TpfP + nout/tps;
+      pdP = {nodes:nP, inst:pPl.k, gp:{nodes:pPl.s, grid:[pPl.g.tp,pPl.g.pp], rep:pPl.g.rep}, lP:pPl.supplyEff, fac:pPl.fac, tpfEff:pPl.tpfEff, lPraw:pPl.supply};
+      pdD = {nodes:nD, inst:dPl.k, gd:{nodes:dPl.s, grid:[dPl.g.tp,dPl.g.pp], rep:dPl.g.rep},
+             capS:dPl.capS, memMax:dPl.memMax, fac:dPl.fac,
+             streams:dPl.streams, streamsEff:dPl.eff, perInst:dPl.perInst,
+             inflD:Math.min(dPl.perInst, Math.floor(dPl.capS/dPl.fac), Math.max(0,dPl.memMax))};
+      pdP.lPraw = pPl.supply; pdP.fac = pPl.fac;
+      { const dwell=nout/tps, facD=Math.max(1,dPl.fac||1);
+        pdD.capE=Math.max(1,Math.floor(dPl.k*Math.max(0,dPl.capS)/facD));   // D 有效流（形状代价已折算）
+        pdD.capM=Math.max(1,Math.floor(dPl.k*Math.max(0,dPl.memMax)/facD)); // D 显存可挂的有效流
+        pdD.capP=Math.max(1,Math.floor(pPl.supplyEff*dwell));               // P 池按到达率折算的在途条数
+        pdD.capAll=Math.min(pdD.capE,pdD.capM,pdD.capP);
+        pdD.effInfl=Math.min(infl,pdD.capAll);
+        pdD.lD=pdD.effInfl/dwell;
+        lam=Math.min(pdD.lD,pPl.supplyEff); }
+      // 瓶颈归属：P 供给不足 → "P"；D 算力不足（没吃满需求并发）→ "D"；D 已吃满需求、λ 由需求封顶 → "需求"
+      pdP.bott = (pPl.supply <= pdD.lD+1e-9) ? "P" : (dPl.streams < infl-1e-9 ? "D" : "需求");
+    }
+  } else if(sp){
+    lam = sp.streams/sp.Tsvc;
+    lamInst = inst>0 ? (Ceff/inst)/sp.Tsvc : 0;
+  }
+  const budInst = nInst*budNode - Weff;
+  const kvFoot = grid ? rep*perInst*S_GB*KVH : 0;
+  const nMemEff = grid ? Math.ceil((Weff + kvFoot)/budNode) : 0;
+  const pfUtilV = pd ? (pdP&&pdP.lP?lam/pdP.lP:0) : (sp? (Ceff/inst)*sp.Tpf/sp.Tsvc : 0);
+  const decUtilV = pd ? (pdD&&pdD.capS>0 ? Math.min(infl,pdD.capS)/pdD.capS : 0) : (sp&&decCapI>0 ? Math.min(Ceff/inst,decCapI)/decCapI : 0);
+  const inflMaxV = pd ? (pdD?pdD.inflD:0) : (sp?sp.inflMax:0);
+  const wr = lam*S_GB, rd = wr*RAMPL;
+  // 24h 分时加权负荷系数（先算，容量与磨损都要用）
+  const busyH = Math.max(0,Math.min(24,be-bs)), wf = (busyH*bfr+(24-busyH)*ifr)/24;
+  if(+$("gpu").value===0) gsCustom={pf:+$("pf").value||1.2, hbm:+$("hbm").value||144, pfb:PFB, bw:+$("hbmbw").value||3.35};   // 会话内记住自定义设定
+  // 容量永远按给定保留窗口的峰值全量保留（与忙闲时段无关）；忙闲系数只作用于日写入/磨损
+  const cap = wr*th*3600*RED;
+  const dailyGB = wr*86400*wf,
+        // DWPD 以 5 年保修期定义：TBW = DWPD×容量×365×5
+        wcap = (elife!==null && dailyGB>0) ? elife*dailyGB/(dw*DWPD_YEARS) : 0,
+        capFinal = Math.max(cap, wcap),
+        // 寿命按「最终选型容量」核算：若已按期待寿命扩容，则寿命随之达标（闭环）
+        lifeY = dailyGB>0 ? dw*capFinal*DWPD_YEARS/dailyGB : Infinity;
+  const lifeTxt = !isFinite(lifeY) ? "∞" : (lifeY>=1000 ? ">1000 年" : (lifeY>=100 ? lifeY.toFixed(0)+" 年" : (lifeY>=1 ? lifeY.toFixed(1)+" 年" : lifeY.toFixed(2)+" 年")));
+  const capWork = (pd&&pdD) ? pdD.streams*S_GB*RED : Ceff*S_GB*RED;   // 在途工作集×1.2（按有效并发）
+  const pfUtil = pfUtilV, decUtil = decUtilV, inflMax = inflMaxV;
+  LAST_CAP = pd ? 0 : ((grid&&inst>0) ? inst*inflMax : 0);
+  if(!pd) LAST_CAP_FULL = LAST_CAP;                           // 非 PD：全集群能力 = 当前配比能力
+
+
+  // —— 输出 ——
+  $("r_inst").textContent = inst;
+  $("r_rack").textContent = grid ? nInst : "–";
+  const sTokMB = sTokB/1e6;
+  if(sTokMB>=0.01){ $("r_stok").textContent=sTokMB.toLocaleString("zh",{maximumFractionDigits:4}); $("r_stoku").textContent="MB/token（单请求 "+humanGB(S_GB)+"）"; }
+  else { $("r_stok").textContent=(sTokB/1e3).toLocaleString("zh",{maximumFractionDigits:1}); $("r_stoku").textContent="KB/token（单请求 "+humanGB(S_GB)+"）"; }
+  $("r_capin").textContent = (grid && inflMax) ? (inst*inflMax) : "–";   // PD 分支会在下面覆盖为 D 池三面上限
+  $("r_capin_l").textContent = grid ? ("条在途上限（"+((Tsvc/Tpf)<=decCapI?"prefill 算力":"decode 带宽")+" 受限）") : "条在途上限（算力）";
+  const pdSum = (pd&&pdP&&pdD) ? pdP.nodes+pdD.nodes : 0;
+  const ok = pd ? !!(pdP&&pdD&&pdSum<=nodes&&lam>0) : !!(grid&&inst>0);   // 可部署判据
+  const thEff = (ok && wr>0) ? capFinal/(wr*3600*RED) : 0;   // 等效 KV 保留窗口：选型容量实际可保留的时长（PD 也适用）
+  const notWhy = !pd ? ((grid&&inst===0)
+        ? "节点数 "+nodes+" 不足以容纳 1 个满足需求并发 "+infl+" 的实例（每实例需 "+nInst+" 节点，含 KV ×"+rep+" 复制）"
+        : whyNoInst(m,g,hbm,m.W*bw,nodes))
+    : (!pdP||!pdD) ? ((pdRec&&pdRec.minD&&nodes<pdRec.minD+1)
+        ? "总节点 "+nodes+" 不足以同时容纳 D 池与 P 池：D 在目标 tps 下服务需求并发 "+infl+" 至少需 "+pdRec.minD+" 节点（权重+"+infl+" 条并发的 KV），另需 ≥1 节点给 P"
+        : "P 或 D 节点数为 0，或填写的节点数不足以形成 1 个实例")
+    : (pdSum>nodes) ? "P+D 合计 "+pdSum+" 节点 > 总节点 "+nodes+"（超出 "+(pdSum-nodes)+" 无法部署）"
+    : "P 或 D 池供给为 0（λ=0）";
+  $("r_cap").textContent = !ok ? "–" : (capFinal>=1000?(capFinal/1000).toLocaleString("zh",{maximumFractionDigits:1}):capFinal.toLocaleString("zh",{maximumFractionDigits:0}));
+  const lifeSpan = (isFinite(lifeY)&&lifeY<riskY-1e-9) ? '<span class="risk">≈'+lifeTxt+'</span>' : "≈"+lifeTxt;
+  $("r_capu").innerHTML = !ok ? notWhy+"：容量与带宽均按 0 计" : (capFinal>=1000?"TB":"GB")+"（"+(wcap>cap?"<b>磨损保底主导</b> · 实际可保留 KV <b>"+thEff.toFixed(2)+" h</b>":"保留窗口 "+th+"h 全量保留 · 不受忙闲影响")+"；工作集见明细；磨损寿命"+lifeSpan+"）";
+  const fmtBW = v => v>=100 ? v.toFixed(0) : (v>=10 ? v.toFixed(1) : v.toFixed(2));
+  $("r_wr").textContent = fmtBW(wr); $("r_wru").textContent = "GB/s = 到达率 "+lam.toLocaleString("zh",{maximumFractionDigits:2})+" req/s × 单请求 "+humanGB(S_GB)+"（峰值口径；≈"+(wr*3.6).toFixed(0)+" TB/h；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s）";
+  $("r_rd").textContent = fmtBW(rd); $("r_rdu").textContent = "GB/s（≈"+(rd*3.6).toFixed(0)+" TB/h）· 峰值口径，与写并发";
+  $("r_bwsum").textContent = fmtBW(wr+rd)+" GB/s = 写 "+fmtBW(wr)+" + 读 "+fmtBW(rd)+"（读写通道物理独立时只需 max "+fmtBW(Math.max(wr,rd))+"）";
+  $("r_s").textContent = humanGB(S_GB);
+  if(m.idx){ $("row_idx").style.display=""; $("r_idx").textContent = (m.idx*bk/1000).toLocaleString("zh",{maximumFractionDigits:1})+" KB/token（"+m.idx.toLocaleString()+" 元素）"; }
+  else $("row_idx").style.display="none";
+  { const parts=[]; if(m.es) parts.push(humanGB(m.es*(m.esB||4)/1e9)+" 循环态（FP"+((m.esB||4)===4?"32":"16")+"）");
+    if(m.ws) parts.push(humanGB(m.ws*(m.wsB===0?bk:1)/1e9)+" 滑窗快照（"+(m.wsB===0?"随 KV 精度":"FP8，官方")+"）");
+    if(parts.length){ $("row_state").style.display=""; $("d_state").textContent=parts.join(" + "); }
+    else $("row_state").style.display="none"; }
+  $("r_lam").textContent = lam.toLocaleString("zh",{maximumFractionDigits:1})+" req/s";
+  $("d_kvrate").innerHTML = ok ? (wr.toFixed(1)+" GB/s（= "+lam.toFixed(2)+" req/s × "+humanGB(S_GB)+"；单流 "+(tps*sTokB/1e6).toFixed(2)+" MB/s = "+tps+" tok/s × "+(sTokB/1e3).toFixed(1)+" KB/token；≈"+(wr*3.6).toFixed(0)+" TB/h）") : "–";
+  $("d_w").textContent = grid ? (humanGB(inst*Weff)+"（"+inst+" 实例 × 单份 "+humanGB(Weff)+"）") : humanGB(Weff)+"（单份，未部署）";
+  $("d_bud").textContent = humanGB(Math.max(budInst,0));
+  const totGPU = nodes*g, usedGPU = grid ? inst*nInst*g : 0;
+  $("gpuhint").innerHTML = "GPU 总数 = " + nodes + " 节点 × " + g + " 卡 = <span class=\"hot\" style=\"font-size:15.5px\">" + totGPU.toLocaleString() + " 卡</span>";
+  $("d_gpu").innerHTML = grid ? ("<span class=\"hot\">" + totGPU.toLocaleString() + " 卡</span> = 占用 " + usedGPU.toLocaleString() + "（" + inst + " 实例 × " + nInst + " 节点 × " + g + " 卡）+ 闲置 " + (totGPU-usedGPU).toLocaleString()) : "<span class=\"hot\">" + totGPU.toLocaleString() + " 卡</span>（无法部署实例）";
+  $("d_grid").textContent = grid ? ("TP"+grid[0]+" × PP"+grid[1]+"（复制×50%常驻后显存下限 "+nMemEff+" 节点"+(nInst>nMemEff?"，并行合法化上调至 "+nInst:"")+"）") : "无合法 TP×PP 组合";
+  const dash="–（不可部署）";
+  $("d_lv").textContent = grid ? (budInst>0 ? (100*kvFoot/budInst).toFixed(0)+"%"+(rep>1?"（含 "+rep+"× 复制，按 50% 常驻计）":"") : "超出显存") : dash;
+  $("d_pf").textContent = ok ? (Tpf*1000).toFixed(0)+" ms" : dash;
+  $("d_svc").textContent = ok ? Tsvc.toFixed(2)+" s" : dash;
+  $("d_pfutil").textContent = grid ? (100*pfUtil).toFixed(0)+"%" : dash;
+  $("d_decutil").textContent = grid ? (100*decUtil).toFixed(0)+"%（每实例 "+Math.min(Math.round(Ceff/Math.max(1,inst)),decCapI)+" / "+decCapI+" 流；每步读 激活权重 "+A_GB.toFixed(1)+" GB + 在驻 KV ÷ 单卡 "+bwH+" TB/s）" : dash;
+  $("inflhint").innerHTML = !grid ? "需求参数：由业务峰值并发请求数给定；当前配置无法部署，上限未知"
+    : ((inst*inflMax)>=infl ? "需求参数：需求 "+infl+" ≤ <b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）"
+                            : "需求参数：需求 "+infl+" 已超<b>上限 "+(inst*inflMax)+"</b>（"+inst+" 实例 × 每实例 "+inflMax+"）—— 超出部分不产生吞吐，容量按 "+(inst*inflMax)+" 计");
+  $("d_inflmax").textContent = grid ? ((inst*inflMax)+" 条（每实例 "+inflMax+" × "+inst+" 实例；受限项："+((Tsvc/Tpf)<=decCapI?"prefill 算力":"decode 带宽")+"；需求 "+infl+" → 有效 "+Ceff+"）") : dash;
+  $("d_work").textContent = grid ? (humanGB(capWork)+(Ceff<infl?"（按有效并发 "+Ceff+"/"+infl+"）":"")) : dash;
+  if(pd && (!pdP||!pdD||((pdP&&pdD)&&(pdP.nodes+pdD.nodes>nodes)))){
+    const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+    updPDIdle(nP,nD,nodes);
+    let why;
+    if(nP<=0||nD<=0){
+      const bud=g*hbm*UTIL, szs=[...new Set(legalList(m,g,Math.max(64,nodes)).map(x=>x.s))].sort((a,b)=>a-b);
+      const pMin=szs.find(sz=>Weff<=sz*bud)||0;
+      const dMin=szs.find(sz=>{ const q=dAt(m,g,hbm,pf,tps,S_GB,Weff,sz,infl,legalList(m,g,sz),bwH,A_GB); return q&&q.streams>0; })||0;
+      why="尚未填写配比（当前 P "+nP+" / D "+nD+" 节点）：点「按算力均衡推荐」自动求解，或手动填入"+
+          (pMin&&dMin? "；按当前配置，P 池至少 "+pMin+" 节点、D 池至少 "+dMin+" 节点，两池合计至少 "+(pMin+dMin)+" 节点（当前总节点 "+nodes+"）" : "");
+    }
+    else if(!pdP) why="P 池 "+nP+" 节点无法形成可部署实例 —— "+whyNoInst(m,g,hbm,Weff,nP).replace(/当前每节点/g,"每节点").replace(/→ 另一条路.*$/,"");
+    else if(!pdD) why="D 池 "+nD+" 节点无法形成可部署实例（decode 还要常驻在途 KV，比只放权重更吃显存）—— "+whyNoInst(m,g,hbm,Weff,nD).replace(/→ 另一条路.*$/,"");
+    else why="P 池或 D 池供给为 0";
+    if(nP+nD>nodes) why="P+D = "+(nP+nD)+" 节点 > 总节点 "+nodes+"（超出 "+(nP+nD-nodes)+"）—— "+why;
+    $("pdhint").innerHTML="<b style=\"color:var(--bad)\">当前配比不可部署</b>："+why;
+  } else if(pd&&pdP&&pdD){
+    // —— PD 池覆写首屏与明细 ——
+    $("r_inst").textContent=pdP.inst; $("r_inst_l").textContent="个 P 实例（每实例 "+pdP.gp.nodes+" 节点）";
+    $("r_rack").textContent=pdD.inst; $("r_rack_l").textContent="个 D 实例（每实例 "+pdD.gd.nodes+" 节点）";
+    const copies=pdP.inst+pdD.inst;
+    $("d_w").textContent=humanGB(copies*Weff)+"（P "+pdP.inst+" + D "+pdD.inst+" = "+copies+" 份 × 单份 "+humanGB(Weff)+"）";
+    $("d_grid").textContent="P 池 TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+" × "+pdP.inst+" 实例 ｜ D 池 TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+" × "+pdD.inst+" 实例";
+    const usedP=pdP.inst*pdP.gp.nodes*g, usedD=pdD.inst*pdD.gd.nodes*g;
+    $("d_gpu").innerHTML="<span class=\"hot\">"+(usedP+usedD).toLocaleString()+" 卡</span> = P 池 "+usedP+"（"+pdP.nodes+" 节点）+ D 池 "+usedD+"（"+pdD.nodes+" 节点）· 闲置 "+Math.max(0,nodes*g-usedP-usedD).toLocaleString();
+    const footD=pdD.gd.rep*pdD.inflD*S_GB*KVH, budD=pdD.gd.nodes*budNode-W_GB;
+    $("d_lv").textContent="D 池水位 "+(budD>0?(100*footD/budD).toFixed(0)+"%":"超出")+"（每 D 实例 KV "+humanGB(footD)+"，含 ×"+pdD.gd.rep+" 复制，50% 常驻）";
+    $("d_bud").textContent=humanGB(Math.max(budD,0))+"（D 实例 KV 预算）";
+    $("d_pfutil").innerHTML=(100*pfUtilV).toFixed(0)+"%（P 池供给上限 "+pdP.lP.toFixed(2)+" req/s）";
+    $("d_decutil").innerHTML=(100*decUtilV).toFixed(0)+"%（每 D 实例 有效并发 "+Math.round(pdD.streams/Math.max(1,pdD.inst))+" / 带宽上限 "+pdD.capS+" 流；每步读 激活权重 "+A_GB.toFixed(1)+" GB + 各流在驻 KV，单卡 "+bwH+" TB/s）";
+    // 当前配比下「集群最多能挂多少在途请求」：P 池能喂多少 + D 池 decode/显存各能挂多少，取 min
+    const dDec=pdD.capE, dMem=pdD.capM, pCap=pdD.capP; LAST_CAP=pdD.capAll;
+    pdD.capBnd=(pdD.capAll===pCap)?"P 池 prefill":((pdD.capAll===dDec)?"D 池带宽（有效流）":"D 池显存（有效流）");
+    $("inflhint").innerHTML = (infl>pdD.capAll)
+      ? "需求参数：需求 "+infl+" 已超本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D 带宽 "+dDec+" ｜ D 显存 "+dMem+"，受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐"
+      : "需求参数：需求 "+infl+" ≤ 本配比<b>算力上限 "+pdD.capAll+" 条</b>（P 池 "+pCap+" ｜ D 有效流 "+dDec+" ｜ D 显存 "+dMem+"；受限项 "+pdD.capBnd+"）";
+    $("d_inflmax").textContent=pdD.capAll+" 条（P 池 "+pCap+" ｜ D 有效流 "+dDec+" ｜ D 显存 "+dMem+"；受限项："+pdD.capBnd+"；需求 "+infl+" → 有效 "+pdD.effInfl+"）";
+    {const e2e=lam*Tsvc, pre=Math.max(0,e2e-pdD.capAll);
+     $("d_svc").innerHTML = Tsvc.toFixed(2)+" s（同口径校验：到达率 λ "+lam.toFixed(2)+" req/s × 服务时长 = <b>"+e2e.toFixed(0)+" 条端到端在途</b> = decode 段 "+pdD.capAll+" + prefill 段 "+Math.round(pre)+"）";}
+    $("r_capin").textContent=pdD.capAll; $("r_capin_l").textContent="条在途上限（"+pdD.capBnd+" 受限）";
+    $("d_work").textContent=humanGB(pdD.inst*pdD.inflD*S_GB*RED);
+    const rec=pdRec, sum=pdP.nodes+pdD.nodes;
+    let hs="P 池 "+pdP.nodes+" 节点（"+pdP.inst+" 实例 × "+pdP.gp.nodes+(pdP.nodes>pdP.inst*pdP.gp.nodes?"，池内闲置 "+(pdP.nodes-pdP.inst*pdP.gp.nodes)+" 节点":"")+"；TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）"+(pdP.fac?"形状代价 ×"+pdP.fac.toFixed(2)+"（有效 prefill "+(pdP.tpfEff*1000).toFixed(0)+" ms） ":"")+"供给 "+pdP.lP.toFixed(2)+" req/s（理想 "+pdP.lPraw.toFixed(2)+"） ｜ D 池 "+pdD.nodes+" 节点（"+pdD.inst+" 实例 × "+pdD.gd.nodes+"）供给 "+pdD.lD.toFixed(2)+" req/s ｜ 系统 λ="+lam.toFixed(2)+" req/s ｜ <b>算力上限 "+pdD.capAll+" 条在途</b>（受限项 "+pdD.capBnd+"）｜ 瓶颈："+(pdP.bott==="P"?"P 池（prefill 供给不足）":pdP.bott==="D"?"D 池（带宽/显存不足）":"需求并发封顶（两池仍有余量）");
+    if(rec.best&&(rec.best.nP!==pdP.nodes||rec.best.nD!==pdD.nodes)) hs+=" ｜ <b>推荐配比 P "+rec.best.nP+" / D "+rec.best.nD+"</b>（λ 可达 "+rec.best.l.toFixed(2)+" req/s，点「按算力均衡推荐」应用）";
+    hs=hs.replace(/ ｜ $/,"");
+    if(sum>nodes) hs+=" ｜ <b style=\"color:var(--bad)\">P+D="+sum+" > 总节点 "+nodes+"，超出 "+(sum-nodes)+" 节点无法部署</b>";
+    else if(sum<nodes) hs+=" ｜ "+(nodes-sum)+" 节点闲置（未分配）";
+    $("pdhint").innerHTML=hs;
+  }
+  $("d_theff").innerHTML = ok ? (thEff >= th*1.01
+      ? thEff.toFixed(2)+" h（输入窗口 "+th+" h；<b>磨损保底扩容的隐含收益</b>：容量可保留更久 / 降低回源，或作冗余）"
+      : thEff.toFixed(2)+" h（= 输入窗口，容量未被磨损扩容）") : dash;
+  const wfTxt = (busyH>0&&busyH<24) ? (100*wf).toFixed(0)+"%（忙 "+busyH+"h×"+(100*bfr).toFixed(0)+"% + 闲 "+(24-busyH)+"h×"+(100*ifr).toFixed(0)+"%）" : "全天 "+(100*wf).toFixed(0)+"%";
+  $("tpshint").textContent = "tok/s · 每流 → 单实例合计 "+(infl*tps).toLocaleString("zh")+" tok/s（"+infl+" 在途 × "+tps+"）";
+  $("d_cf").textContent = "×"+(100*wf).toFixed(0)+"%（容量不折算、始终按窗口峰值全量保留 "+th+"h；该系数只把日均写入从峰值折算为实际值，进而影响磨损寿命）";
+  $("d_wf").textContent = wfTxt; $("whint").textContent = "24h 加权负荷 = "+wfTxt;
+  $("d_daily").textContent = ok ? (dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB/日":dailyGB.toFixed(0)+" GB/日") : dash;
+  $("d_dailypeak").textContent = ok ? (wr*86400>=1000?(wr*86400/1000).toFixed(1)+" TB/日":(wr*86400).toFixed(0)+" GB/日")+"（× 100%，仅作对照）" : dash;
+  const ovw = capFinal>0 ? dailyGB/capFinal : 0;
+  $("d_ovw").textContent = !ok ? dash : ovw.toFixed(2)+" 次/日（= "+(dailyGB/1000).toFixed(1)+" TB/日 ÷ "+humanGB(capFinal)+"）";
+  $("d_life").innerHTML = !ok ? dash : (lifeY<riskY-1e-9
+    ? '<span class="risk">'+lifeTxt+' ⚠ 低于'+(elife!==null?'期待 '+elife+' 年':' 3 年风险线')+'</span>（DWPD '+dw+'）'
+    : lifeTxt+'（DWPD '+dw+'）'+(elife===null?'，≥3 年风险线':''));
+  $("d_wcap").textContent = !ok ? dash : (elife===null
+    ? "未计入（期待寿命留空，容量仅按保留窗口）"
+    : (wcap>cap ? humanGB(wcap)+" —— 磨损主导，选型容量取此值（<b>窗口再缩小也不会低于此保底</b>：保底按日均写入 × 期待寿命推算，与窗口无关）" : humanGB(wcap)+"（低于保留窗口容量，后者主导）"));
+  $("f_show").innerHTML = (pd&&pdP&&pdD)
+    ? ("本例（PD 双池）：每实例各持一份权重 "+humanGB(W_GB)+"，共 "+(pdP.inst+pdD.inst)+" 份（P "+pdP.inst+" + D "+pdD.inst+"）= "+humanGB((pdP.inst+pdD.inst)*W_GB)+"；D 池在途 KV "+pdD.gd.rep+"×"+pdD.inflD+"×"+humanGB(S_GB)+"×50%常驻（TP"+pdD.gd.grid[0]+" 复制）→ D 实例显存下限 "+pdD.gd.nodes+" 节点；"+
+       "P 池 "+pdP.inst+" 实例 × "+pdP.gp.nodes+" 节点（TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）供给 "+pdP.lP.toFixed(2)+" req/s ｜ D 池 "+pdD.inst+" 实例 × "+pdD.gd.nodes+" 节点（TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）供给 "+pdD.lD.toFixed(2)+" req/s；"+
+       "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms/P 实例；"+
+       "24h 加权 "+(100*wf).toFixed(0)+"% → 日均写 "+(dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB":dailyGB.toFixed(0)+" GB")+" → 磨损寿命≈"+lifeTxt+"；"+
+       "系统到达率 = min("+pdP.lP.toFixed(2)+", "+pdD.lD.toFixed(2)+") = "+lam.toFixed(2)+" req/s；D 池可承载 "+(pdD.capS*pdD.inst)+" 流（每实例 "+pdD.capS+"，单卡 "+bwH+" TB/s）")
+    : (!ok
+      ? "本例：当前输入未形成可部署实例——"+notWhy+"（可点「按算力均衡推荐」或增节点）"
+      : ("本例：权重 "+humanGB(Weff)+" + 在途KV "+rep+"×"+perInst.toFixed(1)+"×"+humanGB(S_GB)+"×50%常驻（TP"+(grid?grid[0]:"?")+" 复制，每实例分摊 "+Math.round(infl/Math.max(1,inst))+" 条并发）→ 显存下限 "+nMemEff+" 节点"+(grid?"，取合法网格 TP"+grid[0]+"×PP"+grid[1]+" → "+nInst+" 节点":"（无合法网格）")+"；"+
+         "prefill = 2×"+m.P+"e9×"+ctx+" + "+m.Lf+"×("+m.dm+"+"+(m.dkv||m.td)+")×"+ctx+"² = "+(fl/1e15).toFixed(3)+" PFLOPs → "+(Tpf*1000).toFixed(0)+" ms；"+
+         "24h 加权 "+(100*wf).toFixed(0)+"% → 日均写 "+(dailyGB>=1000?(dailyGB/1000).toFixed(1)+" TB":dailyGB.toFixed(0)+" GB")+" → 磨损寿命≈"+lifeTxt+"；"+
+         "到达率 = 有效并发 "+Ceff+"（需求 "+infl+"，上限 "+(inst*inflMax)+"）/"+Tsvc.toFixed(2)+"s = "+lam.toFixed(1)+" req/s；decode 带宽上限 "+decCapI+" 流/实例（单卡 "+bwH+" TB/s、每步先读激活权重 "+A_GB.toFixed(1)+" GB、每流在驻 KV "+kvFoot.toFixed(1)+" GB）"));
+
+  // —— 风险告警 ——
+  const chk=[];
+  if(ctxI.max>(m.ctx||Infinity)) chk.push({c:"bad",t:"上下文上限 "+ctxI.max.toLocaleString()+" 超出模型支持的最大上下文 "+(m.ctx||0).toLocaleString()+"：请下调区间上限（或换支持更长上下文的模型）"});
+  if(pd){ /* PD 模式告警在下方 pools 分支统一给出 */ }
+  else if(!grid){
+    chk.push({c:"bad",t: nodes<nMemEff ? "节点不足：单实例需 ≥"+nMemEff+" 节点（权重+50% 常驻的复制 KV），当前仅 "+nodes+" 节点"
+      : "无合法 TP×PP 且显存可行组合：TP 须整除 "+m.nq+" 头与 "+m.dm+" 宽、PP 须整除 "+m.L+" 层（可试降需求并发/上下文/位宽，或加节点）"});
+  }else{
+    if(nInst>nMemEff) chk.push({c:"warn",t:"显存只需 "+nMemEff+" 节点，但 TP×PP 整除不满足，已上调至 "+nInst+" 节点（TP"+grid[0]+"×PP"+grid[1]+"）"});
+    if(inst>=1) chk.push({c:"ok",t:"显存口径可部署 "+inst+" 个实例（每实例 "+nInst+" 节点，TP"+grid[0]+"×PP"+grid[1]+(rep>1?"，KV 每实例复制 ×"+rep:"")+"）"});
+    else chk.push({c:"bad",t:"最小合法实例 "+nInst+" 节点 > 总节点 "+nodes+"：加节点 / 降在途 / 降权重位宽 / 减上下文"});
+    if(grid[0]>nvDomain()) chk.push({c:"bad",t:"TP"+grid[0]+" 超出 1 个 NV 域（"+nvDomain()+" 卡）→ 需跨域 3.2 Tbps RDMA，通信代价陡增"});
+    else if(grid[0]>g) chk.push({c:"ok",t:"TP"+grid[0]+" 跨 "+(grid[0]/g)+" 节点，仍在同一 NV 域内（256 卡/域，域内走 NVLink 交换）"});
+    if(grid[1]>8) chk.push({c:"bad",t:"PP"+grid[1]+" 超出建议上限 8：单请求须穿越 "+grid[1]+" 段流水线，本拓扑不建议直接上线——结果仅作容量测算，部署需引入 EP/DP 或降低在途/上下文（页面未搜索 EP/DP 拓扑）"});
+  }
+  if(m.ctx && ctx>m.ctx) chk.push({c:"warn",t:"上下文 "+ctx.toLocaleString()+" 超模型上限 "+m.ctx.toLocaleString()+"，结果仅供参考"});
+  if(be<=bs) chk.push({c:"warn",t:"忙时段结束（"+be+" 时）≤ 开始（"+bs+" 时）：当前按 0 小时忙计算（等效全天闲时 "+((100*ifr).toFixed(0))+"%）；页面不支持跨零点班次，请拆分时段分别评估"});
+  if(bw===0.5 && pf>1.2) chk.push({c:"warn",t:"INT4 权重 + "+pf+" PF 疑似口径错档：weight-only INT4 以 BF16 算力执行，若此值来自 FP8 峰值请改约 "+(pf/2)+" PF，否则 prefill/decode 将乐观约 2×"});
+  if(grid && !pd){
+  chk.push(Tpf*1000<=ttft ? {c:"ok",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms ≤ TTFT 目标 "+ttft+" ms（未计排队）"}
+                          : {c:"warn",t:"单请求 prefill "+(Tpf*1000).toFixed(0)+" ms（形状代价 ×"+(pdP&&pdP.fac?pdP.fac.toFixed(2):"?")+" → 有效 "+(((pdP&&pdP.tpfEff)||Tpf)*1000).toFixed(0)+" ms）超 TTFT 目标 "+ttft+" ms：增加每实例节点数、降 PP/TP 跨机或降上下文"});
+  chk.push((inst*inflMax)>=infl
+    ? {c:"ok",t:"prefill 算力充足：集群上限 "+(inst*inflMax)+" 并发 ≥ 需求 "+infl+"（"+inst+" 实例 × 上限 "+inflMax+"）"}
+    : {c:"warn",t:"<b>需求超出算力上限</b>：需求 "+infl+" 并发 > 集群上限 "+(inst*inflMax)+"（"+inst+" 实例 × 每实例 "+inflMax+"；prefill "+(Tpf*1000).toFixed(0)+" ms，利用率 "+(100*pfUtil).toFixed(0)+"%）——吞吐与容量按上限计；要满足需求需加节点 / 降上下文 / 换更小模型（decode 占用 "+(100*decUtil).toFixed(0)+"%）"});
+  chk.push(decUtil<=1 ? {c:"ok",t:"decode 带宽预算可用 "+(100*decUtil).toFixed(0)+"%（每实例 "+(pd&&pdD?pdD.capS:decCapI)+" 流上限：每步读 激活权重 "+A_GB.toFixed(1)+" GB + 各流在驻 KV，"+((pd&&pdD)?(pdD.gd.nodes*pdD.gd.rep):"")+" 单卡 "+bwH+" TB/s）"}
+                     : {c:"bad",t:"<b>decode 带宽不足</b>：目标 tps "+tps+" tok/s/流 下，每实例只能承载 "+(pd&&pdD?pdD.capS:decCapI)+" 条（单卡 HBM "+bwH+" TB/s，每步要先读激活权重 "+A_GB.toFixed(1)+" GB）；请降 tps / 降上下文 / 换更高带宽卡 / 改 KV 精度"});
+  }
+  if(pd&&pdP&&pdD){
+    chk.push({c:pdP.bott==="P"?"warn":(pdP.bott==="D"?"ok":"ok"),t:"P 池（"+pdP.nodes+" 节点 → "+pdP.inst+" 实例 × "+pdP.gp.nodes+"，TP"+pdP.gp.grid[0]+"×PP"+pdP.gp.grid[1]+"）：prefill 供给 "+pdP.lP.toFixed(2)+" req/s，占用 "+(100*pfUtilV).toFixed(0)+"%"+(pdP.bott==="P"?" ← 系统瓶颈（P 池）":"")+"；单请求 prefill "+(Tpf*1000).toFixed(0)+" ms"+(pdP.tpfEff?"（形状代价后 "+((pdP.tpfEff||Tpf)*1000).toFixed(0)+" ms）":"")+(Tpf*1000>ttft?"（超 TTFT 目标 "+ttft+" ms）":"")});
+    chk.push({c:pdP.bott==="D"?"warn":"ok",t:"D 池（"+pdD.nodes+" 节点 → "+pdD.inst+" 实例 × "+pdD.gd.nodes+"，TP"+pdD.gd.grid[0]+"×PP"+pdD.gd.grid[1]+"）：decode 供给 "+pdD.lD.toFixed(2)+" req/s（每 D 实例在途 "+pdD.inflD+"，KV 水位按 "+pdD.gd.rep+"× 复制），占用 "+(100*decUtilV).toFixed(0)+"%"+(pdP.bott==="D"?" ← 系统瓶颈（D 池）":(pdP.bott==="需求"?" ← 受需求并发限（两池仍有余量）":""))});
+    const sPD=pdP.nodes+pdD.nodes;
+    if(sPD>nodes) chk.push({c:"bad",t:"P+D 节点数 "+sPD+" 超过总节点 "+nodes+"：超出 "+(sPD-nodes)+" 节点无法部署，请调整配比"});
+    else if(sPD<nodes) chk.push({c:"warn",t:"P+D 节点数 "+sPD+" 少于总节点 "+nodes+"：有 "+(nodes-sPD)+" 节点闲置，可点「按算力均衡推荐」重新分配"});
+    const rb=pdRec;
+    let rbCap=null;   // 推荐配比自身的算力上限（不是当前配比的）
+    if(rb.best){
+      const lgR=legalList(m,g,Math.max(rb.best.nP,rb.best.nD));
+      const pR=supplyAt(m,g,hbm,pf,fl,rb.best.nP,nodes,lgR,Math.max(1,+$("ttft").value||500),Weff);
+      const dR=dAt(m,g,hbm,pf,tps,S_GB,Weff,rb.best.nD,infl,lgR,bwH,A_GB);
+      if(pR&&dR) rbCap=Math.min(dR.k*Math.floor(dR.capS/dR.fac), dR.k*Math.max(0,dR.memMax), Math.floor(pR.supplyEff*nout/tps));
+    }
+    chk.push(rb.best ? {c:"ok",t:"按算力均衡的推荐配比：P "+rb.best.nP+" / D "+rb.best.nD+"（系统 λ 可达 "+rb.best.l.toFixed(2)+" req/s；当前 "+lam.toFixed(2)+" req/s"+(rbCap?"；该配比算力上限 "+rbCap+" 条在途":"")+"）"}
+                     : {c:"bad",t:"节点不足以同时容纳 P、D 两池的最小合法实例（P 需 "+(pdP?pdP.gp.nodes:"–")+"、D 需 "+(pdD?pdD.gd.nodes:"–")+" 节点）"});
+  }else if(pd){
+    chk.push({c:"bad",t:"PD 分离已启用但 P/D 节点数为 0 或池无法部署：请在「PD 池节点配比」中填写 P、D 节点数（可点「按算力均衡推荐」自动分配）"});
+  }
+  if(ok){
+    // 磨损寿命与部署口径无关，独立成条（不受非 PD 显存预算门控）
+    chk.push(lifeY>=riskY-1e-9||!isFinite(lifeY) ? {c:"ok",t:"磨损寿命 "+lifeTxt+" ≥ "+(elife!==null?"期待 "+elife+" 年":"3 年风险线")+(wcap>cap?"（容量已按磨损保底扩容至 "+humanGB(wcap)+"）":"")+"（24h 加权负荷 "+(100*wf).toFixed(0)+"%）"}
+    : {c:"bad",t:"<b class=\"risk\">磨损寿命风险：仅 "+lifeTxt+" &lt; "+(elife!==null?"期待 "+elife+" 年":"3 年风险线")+"</b>——"+(elife!==null?"闪存将在目标年限前写穿；容量需按磨损保底升至 "+humanGB(wcap)+"（max 口径），或改用更高 DWPD（当前 "+dw+"）的盘":"按当前日写入，闪存将在 3 年风险线内写穿；可在「期待寿命」填入目标年限以反推所需容量，或改用更高 DWPD（当前 "+dw+"）的盘")});
+    if(pd&&pdD){
+      const fD=pdD.gd.rep*pdD.inflD*S_GB*KVH, bD=pdD.gd.nodes*budNode-W_GB, lvD=bD>0?100*fD/bD:999;
+      chk.push(lvD<=100 ? (lvD<=70 ? {c:"ok",t:"D 池 KV 显存水位 "+lvD.toFixed(0)+"% ≤ 70%（每 D 实例 "+humanGB(fD)+"，含 ×"+pdD.gd.rep+" 复制×50% 常驻）"}
+                              : {c:"warn",t:"D 池 KV 显存水位 "+lvD.toFixed(0)+"% > 70%（扩容阈值，每 D 实例 "+humanGB(fD)+"）：建议降在途或加 D 节点"})
+                       : {c:"bad",t:"D 池 KV 显存放不下：水位 "+lvD.toFixed(0)+"%（预算 "+humanGB(Math.max(bD,0))+"）"});
+    }
+    else if(budInst>0){ const lv=100*kvFoot/budInst;
+      chk.push(lv<=100 ? (lv<=70 ? {c:"ok",t:"KV 显存水位 "+lv.toFixed(0)+"% ≤ 70%"+(rep>1?"（含 "+rep+"× 复制×50% 常驻）":"")}
+      : {c:"warn",t:"KV 显存水位 "+lv.toFixed(0)+"% > 70%（扩容阈值）"+(rep>1?"，含 "+rep+"× 复制×50% 常驻":"")+"：建议降在途或加节点"})
+      : {c:"bad",t:"KV 显存放不下：水位 "+lv.toFixed(0)+"%（复制 "+rep+"× 后 "+humanGB(kvFoot)+" > 预算 "+humanGB(budInst)+"）"});}
+    else if(grid) chk.push({c:"bad",t:"权重已占满显存预算，KV 无处存放"});
+  }
+  if(pd&&pdD&&pdD.capAll&&infl>pdD.capAll)
+    chk.push({c:"warn",t:"<b>需求并发超本配比算力上限</b>：需求 "+infl+" > 上限 "+pdD.capAll+" 条（受限项 "+pdD.capBnd+"）—— 超出部分不产生吞吐，容量/带宽按上限计；要承载需加节点或调整 P/D"});
+  const chkBad=chk.filter(x=>x.c!=="ok"), chkOk=chk.filter(x=>x.c==="ok");
+  $("r_chk").innerHTML = (chkBad.length
+      ? chkBad.map(x=>`<li class="${x.c}">${x.t}</li>`).join("")
+      : `<li class="ok">未发现风险告警（全部校核项通过）</li>`)
+    + (chkOk.length ? `<li><details><summary>校核通过项（${chkOk.length}）</summary><ul class="chk-list">${chkOk.map(x=>`<li class="ok">${x.t}</li>`).join("")}</ul></details></li>` : "");
+}
+
+MODELS.forEach(m=>{
+  const tr=document.createElement("tr");
+  const arch=m.cls==="hybrid"?`混合 ${m.Lf}+${m.Ll}`:m.cls==="mla"?`MLA ×${m.L}`:`GQA ×${m.L}`;
+  let nt=m.note;
+  for(const pre of [`MLA×${m.L}`,`MLA ×${m.L}`,`混合：${m.Lf} 全注意力 + ${m.Ll} 线性`,"GQA"]){ if(nt.startsWith(pre)){ nt=nt.slice(pre.length); break; } }
+  nt=nt.replace(/^[，,、：:；;\s]+/,"").replace(/[，,。]+$/,"").trim();
+  const note=nt?(nt.startsWith("（")?nt:"（"+nt+"）"):"";
+  tr.innerHTML=`<td><a href="https://huggingface.co/${m.id}" target="_blank" rel="noopener">${m.n}</a></td><td>${arch}${note}</td><td>${m.W.toLocaleString()} B</td><td>${m.wdt==="nvfp4"?"FP4":m.wdt.toUpperCase()}</td><td title="${m.psrc}">${m.Pe?"~":""}${m.P} B</td><td>${(m.et+(m.idx||0)).toLocaleString()}${m.idx?"（索引 "+m.idx.toLocaleString()+"）":""}</td><td>${m.es?(m.es.toLocaleString()+(m.ws?" + 窗":"")):(m.ws?("窗 "+m.ws.toLocaleString()):"–")}</td><td>${m.ctx?m.ctx.toLocaleString():"–"}</td>`;
+  $("mdb").appendChild(tr);
+});
+const GPUS=[
+ ["自定义（手动输入）",null,null,null,"直接手动填写下方算力 / 显存。",3.35],
+ ["NVIDIA A100 SXM 80G",null,0.312,80,"BF16/FP16 稠密 312 TF（Ampere 无 FP8 Tensor 核心）",2.0],
+ ["NVIDIA A800 SXM 80G",null,0.312,80,"与 A100 同芯（312 TF BF16），仅 NVLink 600→400 GB/s",2.0],
+ ["NVIDIA H20",0.296,0.148,96,"FP8 稠密 296 / BF16 148 TF，96GB HBM3 4TB/s（显存偏科型）",4.0],
+ ["NVIDIA H800 SXM",1.979,0.989,80,"算力与 H100 相同（标称 FP8 3958 含稀疏→稠密 1979），NVLink 砍至 400 GB/s",3.35],
+ ["NVIDIA H100 SXM",1.979,0.989,80,"FP8 稠密 1979 TF（data sheet 头条 1979 为 FP16 稀疏值，取数需÷2 换算稠密）",3.35],
+ ["NVIDIA H200",1.979,0.989,141,"与 H100 同芯，HBM3e 141GB / 4.8TB/s",4.8],
+ ["NVIDIA B100",3.5,1.75,192,"FP8 7 PF 为稀疏口径 → 稠密 3.5 PF；192GB HBM3e",8.0],
+ ["NVIDIA B200",4.5,2.25,192,"FP8 稠密 4.5 PF / FP4 9 PF，192GB HBM3e 8TB/s",8.0],
+ ["NVIDIA B300",4.5,2.25,288,"FP8 稠密与 B200 同为 4.5 PF，FP4 提至 1.5×；288GB",8.0],
+ ["摩尔线程 MTT S4000",null,0.128,48,"官方支持至 BF16/INT8（无 FP8）；BF16 128 TF / INT8 256 TOPS；48GB GDDR6 384-bit 16Gbps → 768 GB/s",0.768],
+ ["摩尔线程 MTT S5000",1.0,0.5,80,"FP8 1000 TF（2026-02 官方公开），80GB HBM 1.6 TB/s（官方规格）",1.6],
+ ["海光 BW1000（深算三号）",null,0.48,64,"FP16 480 TF（部署文档口径，官方未直接公布）；BW1000_H 低配档 130 TF；64GB HBM2e 1.6 TB/s（部署文档口径）",1.6],
+ ["海光 BW1100",0.26,0.13,144,"144GB HBM3e 模组卡、原生 FP8；算力官方未公布，按 2026 白皮书配置表 FP8≈260 / FP16≈130 TF；显存带宽官方未公布，按同代 HBM3e 估算 3.35 TB/s（可手改）",3.35],
+];
+// 「自定义」模式的设定：仅在本次页面会话内跟踪（切走再切回时恢复），不做持久化
+let gsCustom={pf:1.4,hbm:144,pfb:"fp8",bw:3.35};
+{const gs=$("gpu");
+ GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0]+(x[1]!=null?" · FP8 稠密 "+x[1]+" PF":" · BF16 稠密 "+x[2]+" PF")+" · "+x[3]+" GB";gs.appendChild(o);});
+ const fill=()=>{const x=GPUS[+gs.value];
+   if(x[1]==null&&x[2]==null){$("gpumodelhint").textContent=x[4];calc();return;}
+   const bwv=+$("bw").value, useFp8=(bwv===1&&x[1]!=null), useInt8=(bwv===1&&x[1]==null);
+   $("pf").value = useFp8 ? x[1] : useInt8 ? +(2*x[2]).toFixed(3) : x[2];
+   PFB = useFp8 ? "fp8" : useInt8 ? "int8" : "bf16"; showPfBadge();
+   $("hbm").value=x[3]; $("hbmbw").value = (x[5]!=null) ? x[5] : gsCustom.bw; $("gpumodelhint").textContent=x[4]; calc(); };
+ gs.addEventListener("change",()=>{
+   const x=GPUS[+gs.value];
+   if(x[3]==null){                       // 切回「自定义」：恢复此前设定的算力 / 显存，而不是沿用上一个型号的值
+     $("pf").value=gsCustom.pf; $("hbm").value=gsCustom.hbm; $("hbmbw").value=gsCustom.bw; PFB=gsCustom.pfb; showPfBadge();
+   }
+   fill();
+ });
+ const rechk=()=>{const x=GPUS[+gs.value]; if(x&&x[3]!=null&&(+$("pf").value!==x[2]&&!($("bw").value==="1"&&x[1]!=null&&+$("pf").value===x[1]) || +$("hbm").value!==x[3] || (x[5]!=null && Math.abs(+$("hbmbw").value-x[5])>1e-9))){gs.value=0;$("gpumodelhint").textContent="已改为自定义值。";}};
+ $("pf").addEventListener("input",rechk); $("hbm").addEventListener("input",rechk); $("hbmbw").addEventListener("input",rechk);
+ $("bw").addEventListener("change",()=>{ if(+gs.value>0){fill();} else {syncPf();} showPfBadge(); calc(); });
+ gs.value=0;
+ $("gpumodelhint").textContent="默认自定义；选具体型号将覆盖为厂商标称值，切回「自定义」会恢复你本次会话中设定的算力/显存。";
+ syncPf(); showPfBadge();   // 把算力对齐到当前权重精度档
+}
+function pdSyncUI(){
+  const on=$("pd").checked;
+  $("pdblock").style.display=on?"block":"none";
+  $("inflight_lbl").textContent="峰值并发请求数";
+  $("infl_unit").textContent="（集群总）";
+  if(!on){ $("r_inst_l").textContent="个可承载实例"; $("r_rack_l").textContent="节点 / 实例"; }
+}
+// 并发默认值 = 「让双池都打满」的自洽点；用户手改过并发后不再自动覆盖（换模型/切 PD 会重算）
+function concurrencyForSplit(){   // 按用户手填的 P/D 反解「打满 P」的并发
+  const m=MODELS[+sel.value], g=+$("g").value, pf=+$("pf").value, hbm=+$("hbm").value;
+  const ctxI=ctxStats(), ctx=ctxI.mean, ctx2=ctxI.sq, nout=Math.max(1,Math.round(+$("nout").value||512));
+  const tps=Math.max(0.5,+$("tps").value||80), bwv=+$("bw").value||1, bkv=+$("bk").value||1;
+  const nP=Math.max(0,Math.round(+$("pnodes").value||0)), nD=Math.max(0,Math.round(+$("dnodes").value||0));
+  if(nP<=0||nD<=0) return null;
+  const S=((m.et+(m.idx||0))*bkv*ctx + (m.es||0)*(m.esB||4) + (m.ws||0)*(m.wsB===0?bkv:1))/1e9;
+  const fl=2*m.P*1e9*ctx + m.Lf*(m.dm+(m.dkv||m.td))*ctx2;
+  const W=m.W*bwv, nodes=Math.max(1,Math.round(+$("nodes").value||1)), legal=legalList(m,g,Math.max(nP,nD));
+  const A_GB=m.P*bwv, bwH=Math.max(0.1,+$("hbmbw").value||3.35);
+  const ttftMs=Math.max(1,+$("ttft").value||500);
+  const pP=supplyAt(m,g,hbm,pf,fl,nP,nodes,legal,ttftMs,W); if(!pP||pP.supply<=0) return null;
+  const Creq=Math.max(1,Math.floor(pP.supply*nout/tps));   // 取整向下，避免默认并发比算力上限多 1 条
+  const dP=dAt(m,g,hbm,pf,tps,S,W,nD,Creq,legal,bwH,A_GB); if(!dP) return null;
+  return Math.max(1,Math.round(Math.min(Creq,dP.streams)));
+}
+function autoDemand(force){
+  if($("pd").checked){
+    if(force){                                   // 初始化 / 换模型 / 切 PD：重解并发 + 配比
+      const r=bestUtilSplit(), b=r.best;
+      if(b){ $("inflight").value=b.C; $("pnodes").value=b.nP; $("dnodes").value=b.nD; pdUserEdited=false; return true; }
+      return false;
+    }
+    if(inflUserEdited) return false;             // 并发手改过 → 完全不动
+    if(pdUserEdited){                            // 配比手改过 → 只把并发对齐到该配比，保留配比
+      const C=concurrencyForSplit();
+      if(C){ $("inflight").value=C; return true; }
+      return false;
+    }
+    const r=bestUtilSplit(), b=r.best;
+    if(b){ $("inflight").value=b.C; $("pnodes").value=b.nP; $("dnodes").value=b.nD; return true; }
+    return false;
+  }
+  if(!force && inflUserEdited) return false;
+  const b=bestSingleCap();
+  if(b){ $("inflight").value=b.C; return true; }
+  return false;
+}
+function snapInfl(){
+  if(inflUserEdited) return;
+  calc();
+  const cap=LAST_CAP_FULL||LAST_CAP;
+  if(cap>0 && (+$("inflight").value||0)!==cap){
+    $("inflight").value=cap;
+    if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc();   // 并发回到能力值后，配比也重解回满配
+  }
+  if(LAST_CAP>0 && (+$("inflight").value||0)>LAST_CAP){ $("inflight").value=LAST_CAP; calc(); }   // 收敛到当前配比真实可达上限，避免“需求 > 有效”
+}
+function recalc(src){
+  const filled=autoDemand(false);
+  if(!filled && $("pd").checked && !pdUserEdited) applyPDBalance(false);
+  else calc();
+  // 任何参数变化（除了正在编辑并发输入框本身）→ 并发重置为当前配比的能力上限
+  if(src!=="inflight"){
+    const cap=LAST_CAP_FULL||LAST_CAP;
+    if(cap>0 && (+$("inflight").value||0)!==cap){
+      $("inflight").value=cap;
+      if($("pd").checked && !pdUserEdited) applyPDBalance(false); else calc();   // 并发回到能力值后重解配比
+    }
+    if(LAST_CAP>0 && (+$("inflight").value||0)>LAST_CAP){ $("inflight").value=LAST_CAP; calc(); }
+  }
+}
+$("inflight").addEventListener("input",()=>inflUserEdited=true);
+$("pnodes").addEventListener("input",()=>pdUserEdited=true);
+$("dnodes").addEventListener("input",()=>pdUserEdited=true);
+$("pd").addEventListener("change",()=>{ pdSyncUI(); pdUserEdited=false; inflUserEdited=false; autoDemand(true); snapInfl(); });
+$("pdbal").addEventListener("click",()=>{ pdUserEdited=false; applyPDBalance(true); snapInfl(); });
+$("ctxmode").addEventListener("change",()=>{ const d=$("ctxmode").value==="dist";
+  $("ctxsingle").style.display=d?"none":"block"; $("ctxdist").style.display=d?"flex":"none";
+  recalc(); });
+$("ctxsingle").style.display=$("ctxmode").value==="dist"?"none":"block";
+$("ctxdist").style.display=$("ctxmode").value==="dist"?"flex":"none";
+// 结构参数一变（节点数 / 每节点卡数 / GPU 型号 / 单卡显存），PD 配比必须重解
+function reSolvePD(){
+  if(!$("pd").checked) return;
+  pdUserEdited=false; inflUserEdited=false;
+  if(!autoDemand(true)){ $("pnodes").value=0; $("dnodes").value=0; calc(); } else snapInfl();
+}
+["nodes","g","gpu","hbm"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("input",reSolvePD); });
+document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",()=>recalc(e.id)));
+pdSyncUI();
+autoDemand(true);
+snapInfl();   // 初始化：默认并发 + 配比已由 autoDemand 反解，避免再被固定并发口径的推荐覆盖
+</script>
+</body>
+</html>
