@@ -2,138 +2,127 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>有无 KV 缓存存储 · 服务能力对比计算器</title>
 <style>
-:root{--red:#E2231A;--ink:#1a2233;--sub:#5b6577;--line:#e6e9ef;--bg:#f6f7fa;--card:#fff;--ok:#0d8a4f;--warn:#c47f00;--bad:#d33;}
+/* ============ 设计令牌 ============ */
+:root{
+  --ink:#0f172a; --sub:#475569; --muted:#94a3b8;
+  --line:#e2e8f0; --line2:#eef2f7; --bg:#f6f8fb; --card:#fff;
+  --primary:#2f6fed; --primary-soft:#eef3fe;
+  --green:#178a5a; --green-soft:#eefaf4; --green-line:#d9efe4;
+  --amber:#b45309; --bad:#dc2626; --ok:#16a34a;
+  --radius:12px; --shadow:0 1px 2px rgba(15,23,42,.05);
+  --gap:16px;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif;background:var(--bg);color:var(--ink);line-height:1.55}
-header{background:linear-gradient(135deg,#1a2233,#2c3a55);color:#fff;padding:26px 22px}
-header h1{font-size:21px;font-weight:700}
-header p{color:#aeb9cc;font-size:13px;margin-top:6px}
-main{max-width:1080px;margin:18px auto;padding:0 16px;display:grid;grid-template-columns:390px 1fr;gap:16px}
-@media(max-width:900px){main{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:14px}
-.card h2{font-size:14px;color:var(--red);margin-bottom:12px;letter-spacing:.5px}
-.f{margin-bottom:11px}
-.f label{display:block;font-size:12.5px;color:var(--sub);margin-bottom:3px;min-height:17px}
-.f label b{color:var(--ink);font-weight:600}
-.f input,.f select{width:100%;padding:7px 9px;border:1px solid #ccd3de;border-radius:6px;font-size:14px;background:#fff}
-.f input:focus,.f select:focus{outline:2px solid #f3b7b4;border-color:var(--red)}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.chk{display:flex;align-items:center;gap:8px;font-size:13.5px;padding:6px 0}
-.chk input{width:16px;height:16px;accent-color:var(--red)}
-.hint{font-size:11.5px;color:#8a93a5;margin-top:2px}
-.risk{color:var(--bad);font-weight:800}
-.hot{color:var(--red);font-weight:800}
-.pfb{display:inline-block;white-space:nowrap;font-size:10px;font-weight:700;color:#fff;background:var(--red);padding:1.5px 6px;border-radius:8px;margin-left:6px;vertical-align:2px;letter-spacing:.2px}
-.res-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.mini{display:flex;flex-wrap:wrap;gap:4px 20px;margin-top:10px;padding:9px 13px;background:#fafbfc;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--sub)}
-.mini b{color:var(--ink);font-weight:700;font-size:14.5px;font-variant-numeric:tabular-nums}
+body{font-family:-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei","Segoe UI",Roboto,sans-serif;
+  background:var(--bg);color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+::selection{background:#dbe7ff}
 
-.kpi{background:linear-gradient(160deg,#fff,#faf6f6);border:1px solid #f0dcd9;border-radius:10px;padding:14px;text-align:center}
-.kpi .t{font-size:13.5px;color:var(--ink);font-weight:600;margin-bottom:8px;line-height:1.35}
-.kpi .v{font-size:32px;font-weight:800;color:var(--red);line-height:1.15}
-.kpi .u{font-size:11.5px;color:var(--sub);margin-top:6px;line-height:1.5}
-table{width:100%;border-collapse:collapse;font-size:13px}
-td{padding:6px 8px;border-bottom:1px solid var(--line)}
-td:first-child{color:var(--sub)}
-td:last-child{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
-.chk-list{list-style:none;font-size:13px}
-.chk-list li{padding:7px 0;border-bottom:1px dashed var(--line)}
-.chk-list li:last-child{border:none}
-.ok::before{content:"✓ ";color:var(--ok);font-weight:700}
-.warn::before{content:"⚠ ";color:var(--warn);font-weight:700}
-.bad::before{content:"✗ ";color:var(--bad);font-weight:700}
-details{margin-top:8px;font-size:13px}
-summary{cursor:pointer;color:var(--sub);user-select:none}
-.foot{max-width:1080px;margin:0 auto 40px;padding:0 16px}
-.foot .card{font-size:13px;color:var(--sub)}
-.foot h3{font-size:13.5px;color:var(--ink);margin:10px 0 5px}
-.foot code{background:#eef1f6;padding:1px 5px;border-radius:4px;font-size:12px}
-.foot a{color:#2b6cb0;text-decoration:none}
-.mdb{width:100%;font-size:12px}
-.mdb th{background:#eef1f6;padding:5px 7px;text-align:left;border-bottom:2px solid var(--line)}
-.mdb td{padding:4px 7px;border-bottom:1px solid var(--line)}
-.mdb td:last-child{text-align:left;font-weight:400}
-.badge{display:inline-block;font-size:10.5px;border:1px solid #ccd;padding:0 5px;border-radius:8px;margin-left:6px;color:var(--sub)}
-</style>
-<style>
-:root{--gap:16px}
-main{display:block;max-width:1360px;margin:20px auto;padding:0 20px}
-h1{font-size:23px;line-height:1.35;margin:0 0 6px;font-weight:800;letter-spacing:-.01em}
-h1 .badge{font-size:11px;vertical-align:middle}
-.card{margin-bottom:0}
-.layout{display:grid;grid-template-columns:392px minmax(0,1fr);gap:18px;align-items:start}
+/* ============ 顶栏 ============ */
+main{display:block;max-width:1400px;margin:0 auto;padding:0 22px 44px}
+.top{display:flex;align-items:center;gap:10px;margin:24px 0 2px}
+.top h1{font-size:19px;font-weight:750;letter-spacing:-.01em}
+.ver{font-size:11px;font-weight:700;color:var(--primary);background:var(--primary-soft);padding:2.5px 9px;border-radius:999px;letter-spacing:.02em}
+.subline{font-size:12.5px;color:var(--muted);margin:0 0 18px}
+
+/* ============ 布局 ============ */
+.layout{display:grid;grid-template-columns:356px minmax(0,1fr);gap:18px;align-items:start}
 @media(max-width:1100px){.layout{grid-template-columns:1fr}}
-aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
+aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:14px}
 @media(max-width:1100px){aside{position:static}}
 .results{display:flex;flex-direction:column;gap:14px;min-width:0}
-.card h3{margin:14px 0 8px;font-size:12px;letter-spacing:.08em;color:#8b93a1;font-weight:700;text-transform:uppercase}
-.card h3:first-of-type{margin-top:4px}
+
+/* ============ 卡片 ============ */
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.card h2{font-size:12px;color:var(--sub);font-weight:700;letter-spacing:.07em;margin-bottom:10px}
+.card h3{margin:16px 0 8px;font-size:11px;letter-spacing:.09em;color:var(--muted);font-weight:700;text-transform:uppercase}
+.card h3:first-of-type{margin-top:6px}
+
+/* ============ 表单 ============ */
 .f2{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
 .f1{display:grid;grid-template-columns:1fr;gap:10px}
-.f label{font-size:12.5px}
-.f input,.f select{font-size:13.5px;padding:7px 9px;min-width:0}
-.res-card{position:relative;border-left:3px solid #d8dde6;padding:16px 18px}
-.res-card.b{border-left-color:#2f9e6f}
-.res-h{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.res-h h2{margin:0;font-size:16.5px}
-.tag{font-size:11px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);color:var(--sub);font-weight:600;background:#fafbfc;white-space:nowrap}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:12px 0 6px}
-.kpis>div{background:#fafbfc;border:1px solid var(--line);border-radius:8px;padding:8px 11px}
-.kpis b{display:block;font-size:21px;line-height:1.2;color:var(--ink);font-variant-numeric:tabular-nums}
+.f{margin-bottom:0}
+.f label{display:block;font-size:12px;color:var(--sub);margin-bottom:3px;min-height:17px}
+.f label b{color:var(--ink);font-weight:600}
+.f input,.f select{width:100%;padding:7.5px 10px;border:1px solid #d7dee8;border-radius:8px;font-size:13.5px;background:#fff;color:var(--ink);
+  transition:border-color .15s,box-shadow .15s}
+.f input:hover,.f select:hover{border-color:#b9c4d4}
+.f input:focus,.f select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(47,111,237,.12)}
+.hint{font-size:11.5px;color:var(--muted);margin-top:3px}
+.hintline{font-size:12px;color:var(--muted);line-height:1.65;margin:10px 0 0}
+.badge{display:inline-block;font-size:10.5px;border:1px solid var(--line);padding:0 6px;border-radius:8px;margin-left:6px;color:var(--muted)}
+
+/* ============ 结果卡片头 ============ */
+.res-card{padding:16px 20px 18px}
+.res-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.res-h h2{margin:0;font-size:15px;font-weight:750;letter-spacing:-.01em}
+.res-h h2::before{content:"";display:inline-block;width:8px;height:8px;border-radius:3px;margin-right:9px;background:#cbd5e1;vertical-align:2px}
+.res-card.b .res-h h2::before{background:var(--green)}
+.tag{font-size:11px;padding:2.5px 10px;border-radius:999px;color:var(--sub);font-weight:600;background:#f1f5f9;border:none;white-space:nowrap}
+
+/* ============ KPI ============ */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin:14px 0 6px}
+.kpis>div{background:#f8fafc;border:1px solid var(--line2);border-radius:10px;padding:10px 13px}
+.kpis b{display:block;font-size:23px;line-height:1.2;font-weight:750;letter-spacing:-.02em;color:var(--ink);font-variant-numeric:tabular-nums}
 .kpis span{font-size:11.5px;color:var(--sub)}
-.kpis.store>div{background:#f5faf7;border-color:#cfe6d9}
-.kpis.store b{color:#1a6b46}
-.kpis .sub{display:block;font-size:10.5px;color:#8b93a1;margin-top:3px;line-height:1.45}
-.out-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.kpis.store>div{background:var(--green-soft);border-color:var(--green-line)}
+.kpis.store b{color:var(--green)}
+.kpis .sub{display:block;font-size:10.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+
+/* ============ P/D 池卡片 ============ */
 .pdbox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 6px}
-.pdc{border:1px solid #e4e9f2;border-radius:12px;padding:12px 14px;background:linear-gradient(180deg,#fbfcff,#fff)}
-.pdc .t{font-size:12px;font-weight:700;letter-spacing:.04em;color:#8b95a5}
-.pdc .n{font-size:27px;font-weight:800;color:var(--ink);line-height:1.15;margin:2px 0 1px}
-.pdc .n span{font-size:13px;font-weight:600;color:#8b95a5}
-.pdc .meta{font-size:12.5px;color:#5b6675}
-.pdc .m{font-size:13px;color:#39424f;margin-top:6px}
-.pdc .f{font-size:12px;color:#8b95a5;margin-top:4px}
-.pdc.p{border-left:3px solid #2f6fed}
-.pdc.d{border-left:3px solid #1a7f37}
-.ogt{font-size:12px;color:#8b95a5;font-weight:700;letter-spacing:.06em;margin:16px 0 2px}
-details.more{margin-top:10px}
-details.more summary{cursor:pointer;font-size:13px;color:#2563eb;font-weight:700;list-style:none;padding:4px 0}
-details.more summary::-webkit-details-marker{display:none}
-details.more summary::before{content:"＋ ";font-weight:800}
-details.more[open] summary::before{content:"－ "}
-.out-tb td{padding:5.5px 4px;border-bottom:1px dashed #eef1f5;vertical-align:top;line-height:1.5}
+@media(max-width:760px){.pdbox{grid-template-columns:1fr}}
+.pdc{border:1px solid var(--line);border-radius:12px;padding:13px 16px;background:#fff}
+.pdc.p{border-left:3px solid var(--primary)}
+.pdc.d{border-left:3px solid var(--green)}
+.pdc .t{font-size:11.5px;font-weight:700;letter-spacing:.05em;color:var(--muted)}
+.pdc .n{font-size:26px;font-weight:800;color:var(--ink);line-height:1.15;margin:2px 0 1px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.pdc .n span{font-size:13px;font-weight:600;color:var(--muted)}
+.pdc .meta{font-size:12.5px;color:var(--sub)}
+.pdc .m{font-size:13px;color:var(--sub);margin-top:7px}
+.pdc .m b{color:var(--ink);font-weight:700}
+.pdc .f{font-size:11.5px;color:var(--muted);margin-top:4px}
+
+/* ============ 行表 ============ */
+.out-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.out-tb td{padding:7px 2px;border-bottom:1px solid var(--line2);vertical-align:top;line-height:1.55}
 .out-tb tr:last-child td{border-bottom:0}
-.ogt{font-size:12px;color:#8b95a5;font-weight:700;letter-spacing:.06em;margin:16px 0 2px}
+.out-tb td:first-child{color:var(--sub);width:36%;white-space:nowrap}
+.out-tb td:last-child{color:var(--ink);font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.good{color:var(--ok)!important;font-weight:700}
+.bad{color:var(--bad)!important;font-weight:700}
+
+/* ============ 分组与折叠 ============ */
+.ogt{display:flex;align-items:center;gap:10px;font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.09em;margin:16px 0 2px}
+.ogt::after{content:"";flex:1;height:1px;background:var(--line2)}
 details.more{margin-top:10px}
-details.more summary{cursor:pointer;font-size:13px;color:#2563eb;font-weight:700;list-style:none;padding:4px 0}
+details.more summary{cursor:pointer;font-size:12.5px;color:var(--primary);font-weight:600;list-style:none;padding:4px 0;user-select:none}
 details.more summary::-webkit-details-marker{display:none}
-details.more summary::before{content:"＋ ";font-weight:800}
+details.more summary::before{content:"＋ ";font-weight:700}
 details.more[open] summary::before{content:"－ "}
-.out-tb td:first-child{color:var(--sub);width:38%;white-space:nowrap}
-.ogt{font-size:12px;color:#8b95a5;font-weight:700;letter-spacing:.06em;margin:16px 0 2px}
-details.more{margin-top:10px}
-details.more summary{cursor:pointer;font-size:13px;color:#2563eb;font-weight:700;list-style:none;padding:4px 0}
-details.more summary::-webkit-details-marker{display:none}
-details.more summary::before{content:"＋ ";font-weight:800}
-details.more[open] summary::before{content:"－ "}
-.out-tb td:last-child{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
-.bad{color:var(--bad)!important}
-.good{color:#1a7f37!important}
-.cmp-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
-.cmp-tb th,.cmp-tb td{padding:7px 6px;border-bottom:1px solid #eef1f5;text-align:left}
-.cmp-tb th{color:var(--sub);font-weight:600;font-size:12px}
-.cmp-tb td:first-child{color:var(--sub);white-space:nowrap}
-.cmp-tb td:nth-child(2),.cmp-tb td:nth-child(3){font-variant-numeric:tabular-nums}
-.note-box{margin-top:10px;padding:9px 11px;border-radius:8px;background:#f7f9fb;border:1px solid #e6eaf0;font-size:12.5px;line-height:1.65;color:#4a5262}
+
+/* ============ 对比块 ============ */
+.cmp-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:8px}
+.cmp-tb th,.cmp-tb td{padding:8px 6px;border-bottom:1px solid var(--line2);text-align:left}
+.cmp-tb th{color:var(--sub);font-weight:700;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+.cmp-tb td:first-child{color:var(--sub);white-space:nowrap;font-weight:500}
+.cmp-tb td:nth-child(2),.cmp-tb td:nth-child(3){font-variant-numeric:tabular-nums;font-weight:600}
+.note-box{margin-top:12px;padding:10px 13px;border-radius:10px;background:#f8fafc;border:1px solid var(--line2);font-size:12.5px;line-height:1.65;color:var(--sub)}
 .note-box b{color:var(--ink)}
-.hintline{font-size:12px;color:var(--sub);line-height:1.6;margin:8px 0 0}
-.assume{margin-top:14px}
-.assume ul{color:var(--sub);font-size:12.5px;line-height:1.75;padding-left:18px}
-</style></head>
+
+/* ============ 口径与假设 ============ */
+details.assume{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:0 18px;box-shadow:var(--shadow)}
+details.assume>summary{cursor:pointer;list-style:none;padding:14px 0;font-size:12px;font-weight:700;color:var(--sub);letter-spacing:.06em;user-select:none}
+details.assume>summary::-webkit-details-marker{display:none}
+details.assume>summary::before{content:"▸ ";color:var(--muted)}
+details.assume[open]>summary::before{content:"▾ "}
+details.assume ul{color:var(--muted);font-size:12.5px;line-height:1.8;padding:2px 0 16px 18px}
+details.assume ul b{color:var(--sub)}
+</style>
+</head>
 <body>
 <main>
-<h1>有无 KV 缓存存储 · 服务能力对比计算器 <span class="badge" style="color:#ffd;border-color:#ffd">v2.1</span></h1>
-<p class="hint" style="margin:6px 0 14px">只用物理规格推算，不输入需求参数。左栏填参数，右侧上下两块分别是「无 KV 缓存存储」与「有 KV 缓存存储」的推算结果，两栏用同一套算法、同一套输出。</p>
+<div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.2</span></div>
+<p class="subline">按物理规格推算 · 左栏为参数，右侧分别为「无缓存（前缀全量重算）」与「有缓存（前缀命中不重算）」的服务能力，两栏同一套算法</p>
 
 <div class="layout">
   <aside>
@@ -199,7 +188,7 @@ details.more[open] summary::before{content:"－ "}
         <div class="f"><label><b>期待寿命</b>（年）</label><input id="elife" type="number" value="3" step="1" min="0.5"></div>
         <div class="f"><label><b>总 IOPS</b>（选填）</label><input id="iops" type="number" step="1000" min="0" placeholder="留空=不约束"></div>
       </div>
-      <p class="hintline">命中率由「历史前缀 ÷（历史前缀+新增前缀）」直接得出；命中前缀只从设备<b>读回一次</b>。KV 块大小固定按 <b>128 KB</b> 估算 IOPS；<b>保留窗口不再输入</b>：容量需求由期望寿命 + DWPD 反推，实际保留窗口 = 现有容量 ÷ 写入速率，显示在结果区。</p>
+      <p class="hintline">命中率 = 历史 ÷（历史+新增）；保留窗口为派生值（容量 ÷ 写入速率），无需输入。</p>
     </div>
   </aside>
 
@@ -210,7 +199,7 @@ details.more[open] summary::before{content:"－ "}
   </div>
 </div>
 
-<div class="card assume"><h2>口径与假设</h2>
+<details class="assume"><summary>计算口径与假设</summary>
 <ul>
 <li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
 <li><b>有存储（B）</b>：命中率 <b>use = 历史前缀 ÷（历史+新增）</b>，prefill 只重算 <b>(1−use)</b> 的新增前缀；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
@@ -219,7 +208,7 @@ details.more[open] summary::before{content:"－ "}
 <li><b>选型次序</b>：先挑 TTFT 达标（prefill ≤ 目标）的实例组合，再在其中取吞吐最高；若无组合达标，退回吞吐最高并显式提示「无组合满足 TTFT」。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
-</ul></div>
+</ul></details>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -642,7 +631,7 @@ function compare(A,B,note){
   const aB=A.best.bnd, bB=B.best.bnd;
   let conclude;
   if(note&&/无设备|命中率/.test(note)) conclude="没有可用的前缀缓存（命中率 0 或设备带宽为 0）：B 退化为与 A 相同，收益为 0。";
-  else if(dλ>1) conclude="KV 缓存带来正向收益：到达率 <b>+"+dλ.toFixed(1)+"%</b>、并发 <b>"+(dC>=0?"+":"")+dC.toFixed(1)+"%</b>。省掉的重算 = h×r = "+(100*B.use).toFixed(1)+"% 的 prefill；瓶颈从「"+aB+"」变为「"+bB+"」。";
+  else if(dλ>1) conclude="KV 缓存带来正向收益：到达率 <b>+"+dλ.toFixed(1)+"%</b>、并发 <b>"+(dC>=0?"+":"")+dC.toFixed(1)+"%</b>。省掉的重算 = 命中率 "+(100*B.use).toFixed(1)+"% 的 prefill；瓶颈从「"+aB+"」变为「"+bB+"」。";
   else if(Math.abs(dλ)<=1) conclude="两者到达率基本相同：瓶颈在「"+aB+"」，即便省掉 "+(100*B.use).toFixed(1)+"% 的 prefill 也不能再提高 λ；此时 KV 缓存的价值在降低 TTFT 与减少算力占用。";
   else conclude="KV 缓存反而更差（"+dλ.toFixed(1)+"%）：设备读回带宽/IOPS 成为新瓶颈（"+bB+"），原本「"+aB+"」的瓶颈被换掉了。";
   box.innerHTML='<h2>收益对比</h2>'+
