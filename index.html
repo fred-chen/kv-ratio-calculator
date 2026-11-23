@@ -482,7 +482,7 @@ function evalMixed(b,sc,withStore){
   const stallMs = instPrefillTokps>0 ? 1000*chunkTok/instPrefillTokps : 0;
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
   const itlMs=1000/b.tps+stallMs;                                 // 平均 + chunk 阻塞
-  return {ok:true,pd:false,best,inst:best,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
+  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
     duty,stallMs,itlMs,
     wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
     prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
@@ -515,7 +515,7 @@ function evalScene(b,sc,withStore){
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+  return {ok:true,pd:true,best,S_pfx:b.S_pfx,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -578,8 +578,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["设备读回带宽",fmt(res.wrRead)+" GB/s（"+(res.totBW>0?(100*res.wrRead/res.totBW).toFixed(0)+"% 总带宽":"无设备")+"）"]);
     rows.push(["设备台数",(res.devsNeed>res.devsIn?'<span class="bad">需 '+res.devsNeed+' 台（现有 '+res.devsIn+'，不足）</span>':(res.devsNeed+" 台需求 / 现有 "+res.devsIn+" 台 ✓"))]);
     const perReqKV=Math.max(1e-9,res.perReqWrite), wrRate=res.wrMiss;
-    const Sx=res.use<1?Math.max(0,(res.perReqWrite-res.outKV)/(1-res.use)):0;
-    const fullKV=Sx+res.outKV;                                    // 完整前缀 + 输出增量
+    const fullKV=(res.S_pfx||0)+res.outKV;                        // 完整前缀 + 输出增量（直接取，不从写入量反推）
     rows.push(["可保存前缀数",(fullKV>0?fmt(res.capHave/fullKV,0):"–")+" 个（每前缀 "+humanGB(fullKV)+"）"]);
     rows.push(["每请求新增 KV",humanGB(perReqKV)]);
     rows.push(["窗口反推式","容量 ÷ 写入速率 = "+humanGB(res.capHave)+" ÷ "+fmt(wrRate)+" GB/s"+(wrRate>0?" = "+fmt(res.capHave/(wrRate*3600),1)+" h":"")]);
@@ -630,7 +629,7 @@ function compare(A,B,note){
    line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
    '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>'+
    '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
-   '<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>'+
+   (B.totBW>0?'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>':'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>–（未配置设备）</td><td>–</td></tr>')+
    '</table><div class="note-box">'+conclude+'</div>';
 }
 
@@ -651,7 +650,7 @@ function recalc(){
   const gTot=(b.nodes||0)*(b.g||0);
   $("gpuhint").innerHTML="共 <span style=\"font-size:19px\">"+fmt(gTot,0)+"</span> 张 GPU（"+(b.nodes||0)+" 节点 × "+(b.g||0)+"）";
   let note="";
-  if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，收益为 0；但缓存仍需吸收全部前缀写入，λ 受设备带宽（读+写）约束。";
+  if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，收益为 0。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
   let A=null, B=null, pdOK=b.nodes>=2;
   const hasDev=tot>0;                                            // 无设备带宽时 B 退化为 A
@@ -661,9 +660,11 @@ function recalc(){
     A=evalMixed(b,{store:false,devBW:0,devIOPS:0,blk},false);
     B=evalMixed(b,{store:hasDev,devBW:tot,devIOPS:iops,blk},hasDev);
   }
+  if(b.use<=0 && B && B.ok && String(B.best.bnd||"").startsWith("设备")) note+="缓存仍需吸收全部前缀写入，λ 受设备带宽（读+写）约束。";
   LAST_A=A; LAST_B=B;
   $("a_out").innerHTML=outTable(A,false,"");
-  $("b_out").innerHTML=outTable(B,hasDev,note,!!note);   // 未配置设备时不渲染存储红字
+  $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note)
+    :('<div class="res-h"><h2>二、有 KV 缓存存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
   compare(A,B,note);
 }
 
