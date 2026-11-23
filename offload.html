@@ -573,7 +573,7 @@ function outTable(res,withStore,note,scNote){
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
       ? ("平均 "+fmt(tgt,1)+" ms ＋ chunk 阻塞 "+fmt(res.stallMs,1)+" ms ≈ P99 "+fmt(res.itlMs,1)+" ms（前缀算力占比 "+fmt(100*res.duty,1)+"%）"+(res.itlMs<=2*tgt+0.05?' <span class="good">✓ P99 ≤ 2×平均</span>':' <span class="bad">✗ P99 超标</span>'))
-      : (fmt(tgt,1)+" ms（D 池纯 decode，无前缀干扰）<span class=\"good\">✓ 达标</span>")]); }
+      : (fmt(tgt,1)+" ms")]); }
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s = 输出 "+(res.nout||0)+" ÷ 目标 "+fmt(+$("tps").value||80,0)+" tok/s，是目标值不是上限）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
   if(res.pd!==false && res.best.pP && res.best.pP.ttftOK===0) rows.push(["TTFT 目标可达性","<span class=\"bad\">无任何实例组合满足 "+fmt(+$("ttft").value||500,0)+" ms</span>；已按吞吐最高的组合给出（prefill "+fmt(res.prefillMs+res.readMs,0)+" ms），放宽目标或加节点才能达标"]);
