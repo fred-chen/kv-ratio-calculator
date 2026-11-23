@@ -112,7 +112,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
     <div class="card"><h2>参数</h2>
       <h3>集群</h3>
       <div class="f2">
-        <div class="f"><label><b>计算节点数</b></label><input id="nodes" type="number" value="128" min="1" step="1"></div>
+        <div class="f"><label><b>计算节点数</b></label><input id="nodes" type="number" value="128" min="1" max="1024" step="1"></div>
         <div class="f"><label><b>每节点 GPU 数</b></label><input id="g" type="number" value="8" min="1" step="1"></div>
         <div class="f" style="grid-column:1/-1"><div id="gpuhint" style="font-size:15px;font-weight:700;color:var(--ink)"></div></div>
         <div class="f" style="grid-column:1/-1"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint"></div></div>
@@ -185,10 +185,10 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 <div class="card assume"><h2>口径与假设</h2>
 <ul>
 <li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
-<li><b>有存储（B）</b>：前缀命中率 h、命中占比 r，prefill 只重算 <b>(1−h·r)</b>；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
-<li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = max（写入速率 × 保留窗口 × 1.2，按期待寿命与 DWPD 反推的磨损保底容量）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
+<li><b>有存储（B）</b>：命中率 <b>use = 历史前缀 ÷（历史+新增）</b>，prefill 只重算 <b>(1−use)</b> 的新增前缀；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
+<li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底（= 期待寿命 × 日均写入 ÷ DWPD ÷ 5 年）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
 <li><b>保留窗口是派生值</b>（现有容量 ÷ 写入速率），不作为输入；容量需求由「期待寿命 + DWPD + 日均写入」反推。预设里的“建议 KV 保留 X 天”只是提示。</li>
-<li>读写共用设备总带宽（= 单设备带宽×台数）；块随机读；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
+<li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></div>
 </main>
@@ -305,10 +305,10 @@ const CUSTOM_GPU={bf16:0.7, hbm:144, bw:3.35};   // 自定义卡默认：0.7 PF 
 function isCustomGpu(x){ return !x || (x[1]==null&&x[2]==null); }
 function pfForMode(x,bw){
   if(!x) return null;
-  if(isCustomGpu(x)) return CUSTOM_GPU.bf16*(bw===2?1:2);   // BF16 → 0.7；FP8/NVFP4 → 1.4
+  if(isCustomGpu(x)) return CUSTOM_GPU.bf16*(bw===2?1:(bw===1?2:4));   // BF16 0.7 / FP8 1.4 / NVFP4 2.8
   if(bw===2) return x[2];
   if(bw===1) return x[1]!=null?x[1]:2*x[2];
-  return x[1]!=null?x[1]:2*x[2];
+  return 2*(x[1]!=null?x[1]:2*x[2]);                                     // NVFP4 = 2×FP8
 }
 function pfSync(){
   const x=GPUS[+$("gpu").value]||null, bw=+$("bw").value;
@@ -328,10 +328,11 @@ function gpuSync(){
   }
   pfSync();
 }
+let BW_LOCK=false, BK_LOCK=false;   // 用户手动选过精度后，切换模型不再覆盖
 function modelSync(){
   const m=MODELS[+$("model").value];
-  $("bw").value=m.wdt==="bf16"?"2":m.wdt==="fp8"?"1":"0.5";
-  $("bk").value=m.wdt==="bf16"?"2":"1";
+  if(!BW_LOCK) $("bw").value=m.wdt==="bf16"?"2":m.wdt==="fp8"?"1":"0.5";
+  if(!BK_LOCK) $("bk").value=m.wdt==="bf16"?"2":"1";
   $("modelhint").textContent=(m.cls||"")+" · 最大上下文 "+(m.ctx||0).toLocaleString()+" · 激活参数 ~"+m.P+"B · 原生权重 "+String(m.wdt||"").toUpperCase();
   pfSync();
 }
@@ -339,7 +340,7 @@ function modelSync(){
 /* ---------- 读取共同参数 ---------- */
 function readBase(){
   const m=MODELS[+$("model").value], g=Math.max(1,Math.round(+$("g").value||8)), hbm=+$("hbm").value||144;
-  const bwH=+$("hbmbw").value||3.35, pf=+$("pf").value||1.4, nodes=Math.max(1,Math.round(+$("nodes").value||1));
+  const bwH=+$("hbmbw").value||3.35, pf=+$("pf").value||1.4, nodes=Math.min(1024,Math.max(1,Math.round(+$("nodes").value||1)));   // 上限 1024，避免逐键 O(n²) 卡死
   const hist=Math.max(0,+$("hist").value||0), fresh=Math.max(0,+$("fresh").value||0), prefix=Math.max(1,hist+fresh);
   const nout=Math.max(1,+$("nout").value||512), tps=Math.max(0.5,+$("tps").value||80), ttft=Math.max(1,+$("ttft").value||500);
   const bw=+$("bw").value||1, bk=+$("bk").value||1;
@@ -350,7 +351,7 @@ function readBase(){
   const fl=2*m.P*1e9*prefix + m.Lf*(m.dm+(m.dkv||m.td))*prefix*prefix;
   const W=m.W*bw, A_GB=m.P*bw, legal=legalList(m,g,nodes), dwell=nout/tps;
   const bs=+$("bstart").value||0, be=+$("bend").value||0, bl=+$("bload").value||0, il=+$("iload").value||0;
-  const busyH=Math.max(0,Math.min(24,be-bs)), w=(busyH*(bl/100)+(24-busyH)*(il/100))/24;
+  const busyH=be>bs?be-bs:(be<bs?24-bs+be:0), w=(busyH*(bl/100)+(24-busyH)*(il/100))/24;   // 支持跨零点班次
   const pd=true;   // 固定按 PD 分离计算
   const use=prefix>0?Math.min(1,hist/prefix):0;                        // 历史前缀占比 = 命中率
   return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,pd};
@@ -374,16 +375,15 @@ function pickSplit(b,sc){
     let capAll=Math.min(capE,capM,capP), bnd=(capAll===capP)?"P 池 prefill":(capAll===capE?"D 池带宽":"D 池显存");
     let lam=Math.min(pP.supplyEff, capAll/dwell);
     if(sc.store && use>0){
+      const perTraffic=readPerReq+(1-use)*S_pfx+b.nout*b.sTok;   // 每请求设备总流量（读回 + 写入，含 decode 增量）
       if(sc.devBW>0){
-        const bwCap=sc.devBW/Math.max(1e-9,readPerReq);
-        if(bwCap<lam){ lam=bwCap; bnd="设备读带宽"; }
-        const wrCap=sc.devBW/Math.max(1e-9,(1-use)*S_pfx);
-        if(wrCap<lam){ lam=wrCap; bnd="设备写带宽"; }
+        const bwCap=sc.devBW/Math.max(1e-9,perTraffic);
+        if(bwCap<lam){ lam=bwCap; bnd="设备带宽（读+写）"; }
       } else { lam=0; bnd="无设备带宽"; }
       if(sc.devIOPS>0){
-        const blocksPerReq=readPerReq*1e9/128/1024;
+        const blocksPerReq=perTraffic*1e9/128/1024;
         const ioCap=sc.devIOPS/Math.max(1e-9,blocksPerReq);
-        if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS"; }
+        if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS（读+写）"; }
       }
     }
     if(!(lam>0)) return null;
@@ -433,9 +433,10 @@ function evalMixed(b,sc,withStore){
     let lam=Math.min(lamFlops, streams/fac/dwell), bnd=lam===lamFlops?"算力（prefill+decode）":(perMem<=perBw?"HBM 显存":"HBM 带宽");
     const lamRaw=lam;
     if(sc.store&&use>0){
-      if(sc.devBW>0){ const bwCap=sc.devBW/Math.max(1e-9,readPerReq); if(bwCap<lam){ lam=bwCap; bnd="设备读带宽"; } }
+      const perTraffic=readPerReq+(1-use)*S_pfx+nout*b.sTok;
+      if(sc.devBW>0){ const bwCap=sc.devBW/Math.max(1e-9,perTraffic); if(bwCap<lam){ lam=bwCap; bnd="设备带宽（读+写）"; } }
       else { lam=0; bnd="无设备带宽"; }
-      if(sc.devIOPS>0){ const blocks=readPerReq*1e9/128/1024, ioCap=sc.devIOPS/Math.max(1e-9,blocks); if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS"; } }
+      if(sc.devIOPS>0){ const blocks=perTraffic*1e9/128/1024, ioCap=sc.devIOPS/Math.max(1e-9,blocks); if(ioCap<lam){ lam=ioCap; bnd="设备 IOPS（读+写）"; } }
     }
     if(!(lam>0)) continue;
     const cand={s,k,used,g:g0,fac,lam,lamRaw,bnd,ttftMs,perSt,streams,perMem,perBw,idle:nodes-used,
@@ -547,6 +548,7 @@ function outTable(res,withStore,note,scNote){
       : (fmt(tgt,1)+" ms（D 池纯 decode，无前缀干扰）<span class=\"good\">✓ 达标</span>")]); }
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s = 输出 "+(res.nout||0)+" ÷ 目标 "+fmt(+$("tps").value||80,0)+" tok/s，是目标值不是上限）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
+  if(res.pd!==false && res.best.pP && res.best.pP.rank && !res.best.pP.rank[0]) rows.push(["TTFT 目标可达性","<span class=\"bad\">无任何实例组合满足 "+fmt(+$("ttft").value||500,0)+" ms</span>；已按最快 prefill 给出（"+fmt(res.prefillMs+res.readMs,0)+" ms），放宽目标或加节点才能达标"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>（实例尺寸整除余数，已计入；仍以整集群 λ 最大为目标）':"0"]);
   rows.push([withStore?"写入（新前缀+输出增量）":"KV 产生速率（前缀+输出）",fmt(res.wrMiss)+" GB/s"+(withStore?"（其中输出 "+fmt(res.outKV)+" GB/请求）":"")]);
@@ -560,7 +562,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["可保存前缀数（按写入量）",(perReqKV>0?fmt(res.capHave/perReqKV,0):"–")+" 个（每请求写入 "+humanGB(perReqKV)+"）"]);
     rows.push(["窗口反推式","容量 ÷ 写入速率 = "+humanGB(res.capHave)+" ÷ "+fmt(wrRate)+" GB/s"+(wrRate>0?" = "+fmt(res.capHave/(wrRate*3600),1)+" h":"")]);
     rows.push(["容量需求（寿命反推）","按 DWPD "+fmt(res.dwpd,2)+"、期待 "+fmt(res.elife,1)+" 年 → "+humanGB(res.capFinal)+"（现有 "+humanGB(res.capHave)+"）"]);
-    rows.push(["寿命（DWPD "+fmt(res.dwpd,2)+"，期待 "+fmt(res.elife,1)+" 年）",(Number.isFinite(res.lifeY)?'<span class="'+(res.lifeY>=res.elife?"good":"bad")+'">'+fmt(res.lifeY,2)+" 年</span>":"–")]);
+    rows.push(["现有容量对应寿命（硬件口径）",(Number.isFinite(res.lifeHave)?'<span class="'+(res.lifeHave>=res.elife?"good":"bad")+'">'+fmt(res.lifeHave,2)+" 年</span>（= DWPD×现有容量×5÷日均写入；需求容量反推的寿命恒等于期待寿命，已不单列）":"–")]);
     const io=Math.max(0,+$("iops").value||0);
     const ioNeed=res.use>0&&res.totBW>0?(res.lam*res.readPerReq*1e9/128/1024):0;
     rows.push(["IOPS 占用",io>0?(fmt(ioNeed)+" / "+fmt(io)+"（"+(ioNeed>0?(100*ioNeed/io).toFixed(0)+"%":"–")+"）"):"未填（不约束）"]);
@@ -614,7 +616,7 @@ function recalc(){
   const blk=128, iops=Math.max(0,+$("iops").value||0), tot=bwdev*devsIn;
   const b=Object.assign({},b0,{pd:true});
   const capTok=b.m.ctx||0;
-  $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+(b.prefix>capTok?" ⚠ 超出":"");
+  $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+((b.prefix+b.nout)>capTok?" ⚠ 超出（含输出）":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）";
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
   const gTot=(b.nodes||0)*(b.g||0);
@@ -662,8 +664,8 @@ function applyPreset(){
 modelSync(); gpuSync(); modelSync(); applyPreset();
 $("gpu").addEventListener("change",()=>{gpuSync();recalc();});
 $("model").addEventListener("change",()=>{modelSync();recalc();});
-$("bw").addEventListener("change",()=>{pfSync();recalc();});
-$("bk").addEventListener("change",recalc);
+$("bw").addEventListener("change",()=>{BW_LOCK=true;pfSync();recalc();});
+$("bk").addEventListener("change",()=>{BK_LOCK=true;recalc();});
 $("scen").addEventListener("change",()=>{applyPreset();recalc();});
 
 document.querySelectorAll("input").forEach(e=>e.addEventListener("input",recalc));
