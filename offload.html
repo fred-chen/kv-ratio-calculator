@@ -610,7 +610,7 @@ function outTable(res,withStore,note,scNote){
       '<div class="pdc d"><div class="t">推荐 D 池 · 吐</div>'+
         '<div class="n">'+s2.nD+' <span>节点</span></div>'+
         '<div class="meta">'+s2.dP.k+' × '+s2.dP.s+' · '+dG+'</div>'+
-        '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b></div>'+
+        '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b>（满配 '+fmt(res.capAll,0)+' 条在途）</div>'+
         '<div class="f">吐 '+fmt(res.tokps)+' tok/s · 每流 '+tps+' tok/s</div></div></div>';
   }
   if(withStore){
