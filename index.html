@@ -85,6 +85,16 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 .kpis.store b{color:#1a6b46}
 .kpis .sub{display:block;font-size:10.5px;color:#8b93a1;margin-top:3px;line-height:1.45}
 .out-tb{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+.pdbox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0 6px}
+.pdc{border:1px solid #e4e9f2;border-radius:12px;padding:12px 14px;background:linear-gradient(180deg,#fbfcff,#fff)}
+.pdc .t{font-size:12px;font-weight:700;letter-spacing:.04em;color:#8b95a5}
+.pdc .n{font-size:27px;font-weight:800;color:var(--ink);line-height:1.15;margin:2px 0 1px}
+.pdc .n span{font-size:13px;font-weight:600;color:#8b95a5}
+.pdc .meta{font-size:12.5px;color:#5b6675}
+.pdc .m{font-size:13px;color:#39424f;margin-top:6px}
+.pdc .f{font-size:12px;color:#8b95a5;margin-top:4px}
+.pdc.p{border-left:3px solid #2f6fed}
+.pdc.d{border-left:3px solid #1a7f37}
 .ogt{font-size:12px;color:#8b95a5;font-weight:700;letter-spacing:.06em;margin:16px 0 2px}
 details.more{margin-top:10px}
 details.more summary{cursor:pointer;font-size:13px;color:#2563eb;font-weight:700;list-style:none;padding:4px 0}
@@ -558,8 +568,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["算力利用率",(100*I.util).toFixed(1)+"%（prefill + decode 合计占用；"+(I.util>=0.9?'<span class="good">接近饱和</span>':'<span class="hint">有余量</span>')+"）"]);
     rows.push(["混部说明","节点不足以拆分 P/D 池，按单实例同时做 prefill 与 decode 计算"]);
   } else {
-  rows.push(["推荐 P 池（吞）","P "+s2.nP+" 节点（"+s2.pP.k+" × "+s2.pP.s+"；"+pG+"；prefill "+fmt(res.prefillMs+res.readMs,0)+" ms/请求（吞 "+fmt(res.prefTokps)+" tok/s），供给 "+fmt(s2.pP.supplyEff)+" req/s）"]);
-  rows.push(["推荐 D 池（吐）","D "+s2.nD+" 节点（"+s2.dP.k+" × "+s2.dP.s+"；"+dG+"；decode "+fmt(res.dwell,2)+" s/请求（吐 "+fmt(res.tokps)+" tok/s，每流 "+fmt(+$("tps").value||0,0)+" tok/s），可服务 "+fmt(s2.dSup)+" req/s）"]);
+  /* P/D 配比单独用卡片展示（见下方 pdHTML） */
   }
   { const tp=Math.max(0.1,res.tps||1), tgt=1000/tp;
     rows.push(["ITL 校核（TPOT）", res.pd===false
@@ -590,6 +599,20 @@ function outTable(res,withStore,note,scNote){
   }
   let h='<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span>'+(withStore?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
   h+=kpi;
+  if(res.pd!==false && s2 && s2.pP && s2.dP){
+    const tps=fmt(+$("tps").value||0,0);
+    h+='<div class="pdbox">'+
+      '<div class="pdc p"><div class="t">推荐 P 池 · 吞</div>'+
+        '<div class="n">'+s2.nP+' <span>节点</span></div>'+
+        '<div class="meta">'+s2.pP.k+' × '+s2.pP.s+' · '+pG+'</div>'+
+        '<div class="m">prefill <b>'+fmt(res.prefillMs+res.readMs,0)+' ms</b>/请求 · 供给 <b>'+fmt(s2.pP.supplyEff)+' req/s</b></div>'+
+        '<div class="f">吞 '+fmt(res.prefTokps)+' tok/s</div></div>'+
+      '<div class="pdc d"><div class="t">推荐 D 池 · 吐</div>'+
+        '<div class="n">'+s2.nD+' <span>节点</span></div>'+
+        '<div class="meta">'+s2.dP.k+' × '+s2.dP.s+' · '+dG+'</div>'+
+        '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b></div>'+
+        '<div class="f">吐 '+fmt(res.tokps)+' tok/s · 每流 '+tps+' tok/s</div></div></div>';
+  }
   if(withStore){
     const miss=[];
     if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
