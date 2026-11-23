@@ -188,6 +188,7 @@ aside{display:flex;flex-direction:column;gap:12px;position:sticky;top:10px}
 <li><b>有存储（B）</b>：命中率 <b>use = 历史前缀 ÷（历史+新增）</b>，prefill 只重算 <b>(1−use)</b> 的新增前缀；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
 <li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底（= 期待寿命 × 日均写入 ÷ DWPD ÷ 5 年）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
 <li><b>保留窗口是派生值</b>（现有容量 ÷ 写入速率），不作为输入；容量需求由「期待寿命 + DWPD + 日均写入」反推。预设里的“建议 KV 保留 X 天”只是提示。</li>
+<li><b>选型次序</b>：先挑 TTFT 达标（prefill ≤ 目标）的实例组合，再在其中取吞吐最高；若无组合达标，退回吞吐最高并显式提示「无组合满足 TTFT」。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></div>
@@ -548,7 +549,7 @@ function outTable(res,withStore,note,scNote){
       : (fmt(tgt,1)+" ms（D 池纯 decode，无前缀干扰）<span class=\"good\">✓ 达标</span>")]); }
   rows.push(["单请求时长",fmt(res.svc,2)+" s（prefill "+fmt(res.prefillMs,0)+" ms"+(res.readMs>0?" + 命中读回 "+fmt(res.readMs,1)+" ms":"")+" + decode "+fmt(res.dwell,2)+" s = 输出 "+(res.nout||0)+" ÷ 目标 "+fmt(+$("tps").value||80,0)+" tok/s，是目标值不是上限）"]);
   rows.push(["TTFT 校核（含读回）",'<span class="'+(ttftOver?"bad":"good")+'">有效 prefill '+(res.ttftEff).toFixed(0)+" ms "+(ttftOver?"＞目标":"≤ 目标")+"</span>"]);
-  if(res.pd!==false && res.best.pP && res.best.pP.ttftOK===0) rows.push(["TTFT 目标可达性","<span class=\"bad\">无任何实例组合满足 "+fmt(+$("ttft").value||500,0)+" ms</span>；已按最快 prefill 给出（"+fmt(res.prefillMs+res.readMs,0)+" ms），放宽目标或加节点才能达标"]);
+  if(res.pd!==false && res.best.pP && res.best.pP.ttftOK===0) rows.push(["TTFT 目标可达性","<span class=\"bad\">无任何实例组合满足 "+fmt(+$("ttft").value||500,0)+" ms</span>；已按吞吐最高的组合给出（prefill "+fmt(res.prefillMs+res.readMs,0)+" ms），放宽目标或加节点才能达标"]);
   rows.push(["受限项",res.best.bnd]);
   rows.push(["闲置节点",idle>0?'<span class="bad">'+idle+'</span>（实例尺寸整除余数，已计入；仍以整集群 λ 最大为目标）':"0"]);
   rows.push([withStore?"写入（新前缀+输出增量）":"KV 产生速率（前缀+输出）",fmt(res.wrMiss)+" GB/s"+(withStore?"（其中输出 "+fmt(res.outKV)+" GB/请求）":"")]);
@@ -626,7 +627,7 @@ function recalc(){
   const gTot=(b.nodes||0)*(b.g||0);
   $("gpuhint").innerHTML="共 <span style=\"font-size:19px\">"+fmt(gTot,0)+"</span> 张 GPU（"+(b.nodes||0)+" 节点 × "+(b.g||0)+"）";
   let note="";
-  if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，B 与 A 相同。";
+  if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，收益为 0；但缓存仍需吸收全部前缀写入，λ 受设备带宽（读+写）约束。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
   let A=null, B=null, pdOK=b.nodes>=2;
   const hasDev=tot>0;                                            // 无设备带宽时 B 退化为 A
@@ -638,7 +639,7 @@ function recalc(){
   }
   LAST_A=A; LAST_B=B;
   $("a_out").innerHTML=outTable(A,false,"");
-  $("b_out").innerHTML=outTable(B,true,note,!!note);
+  $("b_out").innerHTML=outTable(B,hasDev,note,!!note);   // 未配置设备时不渲染存储红字
   compare(A,B,note);
 }
 
