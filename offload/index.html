@@ -289,7 +289,7 @@ function supplyAt(m,g,hbm,pf,fl,b,nodes,legal,ttftMs,W){    // P 池：prefill �
     const fac=shapeFactor(o.g.tp, o.g.pp, g);
     const tpfEff=o.Tpf*fac;                       // 形状修正后的有效 prefill 时长
     const ttftOK=(!ttftMs||tpfEff*1000<=ttftMs)?1:0;
-    const rank=[ttftOK, o.used>=maxUsed*0.95?1:0, ppOK(o.g), -tpfEff, -o.Tpf, tpInNode(o.g,g)];
+    const rank=[ttftOK, o.used>=maxUsed*0.95?1:0, ppOK(o.g), +(o.supply/fac), tpInNode(o.g,g)];
     if(!best||rankCmp(rank,best.rank)>0) best=Object.assign({rank},o,{fac,tpfEff,supplyEff:o.supply/fac});
   }
   best.ttftOK=best.rank[0]; return best;
