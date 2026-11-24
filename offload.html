@@ -604,8 +604,11 @@ function outTable(res,withStore,note,scNote){
         '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b>（满配 '+fmt(Math.min(s2.capE,s2.capM),0)+' 条在途）</div>'+
         '<div class="f">吐 '+fmt(res.tokps)+' tok/s · 每流 '+tps+' tok/s</div></div></div>';
   }
-  if(res.A_GB>0 && res.W>0 && res.A_GB<0.5*res.W && res.best && String(res.best.bnd||"").startsWith("D 池"))
-    h+='<p class="bad" style="margin:8px 0 2px">⚠ 当前由 D 池带宽约束；MoE 大 batch 的专家权重读放大未建模，λ 可能高估，建议按 40–60% 折算或下调 decode 目标</p>';
+  { const capS=(res.best&&res.best.dP&&res.best.dP.capS)||0;
+    const moe=res.A_GB>0 && res.W>0 && res.A_GB<0.5*res.W;
+    const union=moe&&capS>0?1-Math.pow(1-res.A_GB/res.W,capS):1;
+    if(moe && String((res.best||{}).bnd||"").startsWith("D 池") && union>=0.5)
+      h+='<p class="bad" style="margin:8px 0 2px">⚠ D 池带宽是瓶颈，且每实例约 '+fmt(capS,0)+' 条流已使 MoE 专家权重读放大到 '+Math.round(100*union)+'%；该放大未建模，λ 可能高估，建议按 40–60% 折算或下调 decode 目标</p>'; }
   if(withStore){
     const miss=[];
     if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
