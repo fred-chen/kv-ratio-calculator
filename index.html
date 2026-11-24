@@ -631,10 +631,6 @@ function outTable(res,withStore,note,scNote){
     if(miss.length) h+='<p class="bad" style="font-weight:800;margin:8px 0 2px">✗ 现有配置不满足：'+miss.join("；")+'</p>';
     else h+='<p class="good" style="font-weight:700;margin:8px 0 2px">✓ 现有 '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB 满足寿命 '+fmt(res.elife,1)+' 年，实际可保留 '+fmt(res.effWinHave,1)+' h</p>';
   }
-  if(withStore && res.use>0 && Number.isFinite(res.effWinHave)){
-    const days=(PRESETS[+$("scen").value||0]||{}).days||0;
-    if(days>0 && res.effWinHave < days*24) h+='<p class="bad" style="margin:6px 0 2px">⚠ 实际保留窗口 '+fmt(res.effWinHave,1)+' h ＜ 场景建议 '+days+' 天：超时会话会 miss，真实命中率与收益将低于当前值</p>';
-  }
   if(note) h+='<p class="hint'+(scNote?" bad":"")+'" style="margin:6px 0 2px">'+note+'</p>';
   const cat=l=>/命中率|命中读回|IOPS|窗口反推式|每请求新增|可保存前缀数|设备读回带宽|上下文分段/.test(l)?"more"
     :(/写入|日均|容量需求|现有容量对应寿命|设备台数/.test(l)?"store":"perf");
@@ -706,23 +702,23 @@ function recalc(){
 }
 
 /* ---------- 初始化 ---------- */
-/* 典型场景：平均输入 token / 输入命中率 / 平均输出 / 建议 KV 保留（天）
+/* 典型场景：平均输入 token / 输入命中率 / 平均输出
    数据取自「推理场景 Token 画像」：编程、智能体、多轮对话、数学推理、文档理解、科学研究 */
 const PRESETS=[
-  {n:"编程（Coding）",   inTok:56000, hit:0.85, out:700,  days:7},
-  {n:"智能体（Agent）",   inTok:35000, hit:0.70, out:1000, days:3},
-  {n:"多轮对话",           inTok:3000,  hit:0.50, out:350,  days:2},
-  {n:"数学推理",           inTok:400,   hit:0.10, out:4000, days:1},
-  {n:"文档理解",           inTok:45000, hit:0.25, out:900,  days:14},
-  {n:"科学研究",           inTok:60000, hit:0.30, out:5000, days:30},
-  {n:"自定义",             inTok:null,  hit:null, out:null, days:null}
+  {n:"编程（Coding）",   inTok:56000, hit:0.85, out:700 },
+  {n:"智能体（Agent）",   inTok:35000, hit:0.70, out:1000 },
+  {n:"多轮对话",           inTok:3000,  hit:0.50, out:350 },
+  {n:"数学推理",           inTok:400,   hit:0.10, out:4000 },
+  {n:"文档理解",           inTok:45000, hit:0.25, out:900 },
+  {n:"科学研究",           inTok:60000, hit:0.30, out:5000 },
+  {n:"自定义",             inTok:null,  hit:null, out:null}
 ];
 function applyPreset(){
   const p=PRESETS[+$("scen").value]||PRESETS[PRESETS.length-1];
   if(p.inTok==null){ $("scenhint").textContent="自定义：直接填三段长度"; return; }
   const hist=Math.round(p.inTok*p.hit), fresh=p.inTok-hist;
-  $("hist").value=hist; $("fresh").value=fresh; $("nout").value=p.out;   // 保留窗口不跟着改：容量始终按你填的窗口 + SSD 寿命算
-  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out+" · 该场景建议 KV 保留 "+p.days+" 天（实际保留窗口由「台数×容量」反推，见结果区）";
+  $("hist").value=hist; $("fresh").value=fresh; $("nout").value=p.out;
+  $("scenhint").textContent="输入 "+(p.inTok/1000).toFixed(1)+"k · 命中 "+(p.hit*100).toFixed(0)+"% · 输出 "+p.out;
 }
 
 {const ms=$("model"); MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n;ms.appendChild(o);});
