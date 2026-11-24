@@ -208,14 +208,14 @@ details.assume ul b{color:var(--sub)}
 <li><b>选型次序</b>：先挑 TTFT 达标（prefill ≤ 目标）的实例组合，再在其中取吞吐最高；若无组合达标，退回吞吐最高并显式提示「无组合满足 TTFT」。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
 <li><b>λ 是饱和上限</b>（零排队稳态点），不是可售配额；它未计突发与故障切换，商用容量建议再乘 0.6–0.8 的利用率系数。</li>
-<li><b>MoE 的 decode 权重读</b>按「专家并集」近似：每步权重 ≈ W·(1−(1−A/W)^B)，dense 模型（A≈W）退化为全权重；真实路由偏斜会让并集更快饱和，因此 MoE 的 D 池能力仍可能偏乐观。</li>
+<li><b>未建模 MoE 大 batch 的专家权重读放大</b>：decode 每步权重暂按激活参数计，长上下文、大 batch 的 MoE 场景 D 池能力可能偏乐观（已在 D 池为瓶颈时提示）。</li>
 <li>未建模 <b>P→D 的 KV 迁移</b>（RDMA 带宽/延迟）与 MoE 大 batch 下的专家权重读放大，长上下文 MoE 场景的 D 池能力可能偏乐观。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></details>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const MFU=0.5, UTIL=0.9, DWPD_YEARS=5, _dscCache=new Map();
+const MFU=0.5, UTIL=0.9, DWPD_YEARS=5;
 const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
 const COMM_SHARE=0.35;
 const GCACHE=new Map();
@@ -255,24 +255,12 @@ function shapeFactor(tp, pp, g){
   const tpEff=1+COMM_SHARE*(tpFac-1);                       // 只让通信占比那部分放大 prefill 时长
   return tpEff*(1+PP_PEN*Math.max(0,pp-1));                 // × PP 流水气泡（PP=1 无气泡；每多一级 +1/8）
 }
-function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH, kappa, fullW_GB){
-  const key=cards+"|"+activeW_GB+"|"+rep+"|"+S_GB+"|"+tps+"|"+bwH+"|"+kappa+"|"+(fullW_GB||activeW_GB);
-  if(_dscCache.has(key)) return _dscCache.get(key);
-  const budgetGB = cards*bwH*1000/tps;
-  const A=activeW_GB, W=fullW_GB||activeW_GB;
-  const perStream = rep*S_GB*Math.max(1e-6, kappa);
-  let ans=0;
-  if(perStream>0 && budgetGB>0){
-    if(W<=A*1.000001){ const room=budgetGB-W; ans=room>0?Math.max(0,Math.floor(room/perStream)):0; }
-    else {
-      const base=Math.max(0,1-A/W);
-      const need=B=>W*(1-Math.pow(base,B))+B*perStream;
-      let lo=0, hi=100000;
-      for(let it=0;it<40;it++){ const m=(lo+hi)/2; if(need(m)<=budgetGB) lo=m; else hi=m; }
-      ans=Math.max(0,Math.floor(lo));
-    }
-  }
-  _dscCache.set(key,ans); return ans;
+function decStreamsCap(cards, activeW_GB, rep, S_GB, tps, bwH, kappa){
+  const budgetGB = cards*bwH*1000/tps;          // 每 token-step 可搬运的 GB 数
+  const room = budgetGB - activeW_GB;           // 扣掉激活权重后留给 KV 的预算
+  const perStream = rep*S_GB*Math.max(1e-6, kappa);   // 每流每步要读的在驻 KV（含 TP 复制）
+  if(!(perStream>0) || room<=0) return 0;
+  return Math.max(0, Math.floor(room/perStream));
 }
 function supplyAt(m,g,hbm,pf,fl,b,nodes,legal,ttftMs,W){    // P 池：prefill 供给 req/s
   const budNode=g*hbm*UTIL, cand=[];
@@ -298,7 +286,7 @@ function dAt(m,g,hbm,pf,tps,S,W,b,C,legal,bwH,A_GB,kappa){   // D 池：可服�
   const budNode=g*hbm*UTIL; let best=null;
   for(const it of legal){ if(it.s>b) break; if(it.g0.pp>16) continue;   // PP 超过 16 级的流水气泡不现实，直接排除
     const s=it.s, k=Math.floor(b/s), used=k*s, perInst=C/Math.max(1,k);
-    const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH, kappa, W);   // 每实例可承载流（带宽+激活权重）
+    const capS=decStreamsCap(s*g, A_GB, it.g0.rep, S, tps, bwH, kappa);   // 每实例可承载流（带宽+激活权重）
     const memMax=Math.floor((used*budNode - k*W)/(it.g0.rep*Math.max(1e-9,S)*Math.max(1e-6,kappa)));
     const streams=Math.max(0,Math.min(C, capS*k, memMax));
     const fac=shapeFactor(it.g0.tp,it.g0.pp,g), eff=streams/fac;   // decode 逐 token 受气泡/跨机拖累
@@ -461,7 +449,7 @@ function evalMixed(b,sc,withStore){
     const ttftMs=flEff*fac/(cards*pf*MFU*1e15)*1000;
     const lamFlops=used*g*pf*MFU*1e15/Math.max(1e-9,flEff*fac+decFL);
     const perMem=Math.floor((cards*hbm*UTIL - W)/(g0.rep*Math.max(1e-9,S)+1e-9));
-    const perBw=decStreamsCap(cards, b.A_GB, g0.rep, S, b.tps, bwH, 1, b.W);
+    const perBw=decStreamsCap(cards, b.A_GB, g0.rep, S, b.tps, bwH, 1);
     const perSt=Math.max(0,Math.min(perMem,perBw)), streams=perSt*k;
     let lam=Math.min(lamFlops, streams/fac/dwell), bnd=lam===lamFlops?"算力（prefill+decode）":(perMem<=perBw?"HBM 显存":"HBM 带宽");
     const lamRaw=lam;
@@ -621,7 +609,7 @@ function outTable(res,withStore,note,scNote){
     const moe=res.A_GB>0 && res.W>0 && res.A_GB<0.5*res.W;
     const union=moe&&capS>0?1-Math.pow(1-res.A_GB/res.W,capS):1;
     if(moe && String((res.best||{}).bnd||"").startsWith("D 池") && union>=0.5)
-      h+='<p class="bad" style="margin:8px 0 2px">⚠ D 池带宽是瓶颈，且每实例约 '+fmt(capS,0)+' 条流已使 MoE 专家权重读放大到 '+Math.round(100*union)+'%；该放大未建模，λ 可能高估，建议按 40–60% 折算或下调 decode 目标</p>'; }
+      h+='<p class="bad" style="margin:8px 0 2px">⚠ D 池带宽是瓶颈，MoE 每实例约 '+fmt(capS,0)+' 条流时专家权重读放大已接近 '+Math.round(100*union)+'%；当前仍按激活权重计，λ 可能高估，建议按 40–60% 折算或下调 decode 目标</p>'; }
   if(withStore){
     const miss=[];
     if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
@@ -670,7 +658,6 @@ let LAST_A=null, LAST_B=null;
 
 /* ---------- 主流程 ---------- */
 function recalc(){
-  _dscCache.clear();
   if((+$("nodes").value||0)>1024){ $("nodes").value="1024"; }   // 上限封顶并回写，避免静默
   const b0=readBase();
   const devsIn=Math.max(0,Math.round(+$("devs").value||0)), bwdev=Math.max(0,+$("bwdev").value||0);
