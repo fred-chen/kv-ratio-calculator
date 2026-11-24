@@ -207,12 +207,14 @@ details.assume ul b{color:var(--sub)}
 <li><b>保留窗口是派生值</b>（现有容量 ÷ 写入速率），不作为输入；容量需求由「期待寿命 + DWPD + 日均写入」反推。预设里的“建议 KV 保留 X 天”只是提示。</li>
 <li><b>选型次序</b>：先挑 TTFT 达标（prefill ≤ 目标）的实例组合，再在其中取吞吐最高；若无组合达标，退回吞吐最高并显式提示「无组合满足 TTFT」。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
+<li><b>λ 是饱和上限</b>（零排队稳态点），不是可售配额；商用容量建议再乘 0.6–0.8 的利用率系数。</li>
+<li>未建模 <b>P→D 的 KV 迁移</b>（RDMA 带宽/延迟）与 MoE 大 batch 下的专家权重读放大，长上下文 MoE 场景的 D 池能力可能偏乐观。</li>
 <li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
 </ul></details>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-const MFU=0.5, UTIL=0.9, RED=1.2, RAMPL=1.0, DWPD_YEARS=5;
+const MFU=0.5, UTIL=0.9, DWPD_YEARS=5;
 const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
 const COMM_SHARE=0.35;
 const GCACHE=new Map();
@@ -465,11 +467,11 @@ function evalMixed(b,sc,withStore){
   if(!best) return {ok:false,pd:false};
   const lam=best.lam, outKV=nout*b.sTok, perReqWrite=(1-use)*S_pfx+outKV;
   const wrRead=lam*use*S_pfx, wrMiss=lam*perReqWrite;
+  const tRead=(use>0&&totBW>0)?readPerReq*best.k/Math.max(1,totBW-wrMiss):0;
   const daily=(withStore?wrMiss:lam*(S_pfx+outKV))*86400*b.w;
   const wcap=elife*daily/(dwpd*DWPD_YEARS), capFinal=wcap;
   const lifeY=daily>0?(dwpd*capFinal*DWPD_YEARS/daily):Infinity;
   const devsNeed=capFinal>0?Math.ceil(capFinal/(capdev*1000)):0;
-  const tRead=(use>0&&totBW>0)?readPerReq*best.k/totBW:0;
   const prefTok=withStore?b.fresh:b.prefix;
   const capHave=devsIn*capdev*1000, effWinHave=wrMiss>0?capHave/(wrMiss*3600):Infinity;   // 窗口 = 容量 ÷ 写入速率（新前缀+输出）
   const lifeHave=daily>0?(dwpd*capHave*DWPD_YEARS/daily):Infinity;
@@ -481,7 +483,7 @@ function evalMixed(b,sc,withStore){
   const stallMs = instPrefillTokps>0 ? 1000*chunkTok/instPrefillTokps : 0;
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
   const itlMs=1000/b.tps+stallMs;                                 // 平均 + chunk 阻塞
-  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
+  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
     duty,stallMs,itlMs,
     wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
     prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
@@ -512,9 +514,9 @@ function evalScene(b,sc,withStore){
   const capOK=capHave>=capFinal, lifeOK=!Number.isFinite(lifeHave)||lifeHave>=elife;
   const bwOK=totBW>=(wrMiss+wrRead)*(1-1e-9);
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
-  const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/totBW):0;
+  const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/Math.max(1,totBW-wrMiss)):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,S_pfx:b.S_pfx,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+  return {ok:true,pd:true,best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -583,7 +585,7 @@ function outTable(res,withStore,note,scNote){
     rows.push(["容量需求（寿命反推）","按 DWPD "+fmt(res.dwpd,2)+"、期待 "+fmt(res.elife,1)+" 年 → "+humanGB(res.capFinal)+"（现有 "+humanGB(res.capHave)+"）"]);
     rows.push(["现有容量对应寿命",(Number.isFinite(res.lifeHave)?'<span class="'+(res.lifeHave>=res.elife?"good":"bad")+'">'+fmt(res.lifeHave,2)+" 年</span>":"–")]);
     const io=Math.max(0,+$("iops").value||0);
-    const ioNeed=res.use>0&&res.totBW>0?(res.lam*((res.readPerReq+res.perReqWrite)*1e9/128/1024)):0;   // 读+写合计块数
+    const ioNeed=io>0&&res.totBW>0?(res.lam*((res.readPerReq+res.perReqWrite)*1e9/128/1024)):0;   // 读+写合计块数
     rows.push(["IOPS 占用",io>0?(fmt(ioNeed)+" / "+fmt(io)+"（"+(ioNeed>0?(100*ioNeed/io).toFixed(0)+"%":"–")+"）"):"未填（不约束）"]);
   }
   let h='<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span>'+(withStore?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
@@ -599,9 +601,11 @@ function outTable(res,withStore,note,scNote){
       '<div class="pdc d"><div class="t">推荐 D 池 · 吐</div>'+
         '<div class="n">'+s2.nD+' <span>节点</span></div>'+
         '<div class="meta">'+s2.dP.k+' × '+s2.dP.s+' · '+dG+'</div>'+
-        '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b>（满配 '+fmt(res.capAll,0)+' 条在途）</div>'+
+        '<div class="m">decode <b>'+fmt(res.dwell,2)+' s</b>/请求 · 可服务 <b>'+fmt(s2.dSup)+' req/s</b>（满配 '+fmt(Math.min(s2.capE,s2.capM),0)+' 条在途）</div>'+
         '<div class="f">吐 '+fmt(res.tokps)+' tok/s · 每流 '+tps+' tok/s</div></div></div>';
   }
+  if(res.A_GB>0 && res.W>0 && res.A_GB<0.5*res.W && res.best && String(res.best.bnd||"").startsWith("D 池"))
+    h+='<p class="bad" style="margin:8px 0 2px">⚠ 当前由 D 池带宽约束；MoE 大 batch 的专家权重读放大未建模，λ 可能高估，建议按 40–60% 折算或下调 decode 目标</p>';
   if(withStore){
     const miss=[];
     if(!res.capOK) miss.push("容量 "+humanGB(res.capHave)+" ＜ 需求 "+humanGB(res.capFinal)+"（需 "+res.devsNeed+" 台）");
@@ -610,6 +614,10 @@ function outTable(res,withStore,note,scNote){
     if(!res.bwOK) miss.push("带宽 "+fmt(res.totBW)+" ＜ 需求 "+fmt(res.wrMiss+res.wrRead)+" GB/s");
     if(miss.length) h+='<p class="bad" style="font-weight:800;margin:8px 0 2px">✗ 现有配置不满足：'+miss.join("；")+'</p>';
     else h+='<p class="good" style="font-weight:700;margin:8px 0 2px">✓ 现有 '+res.devsIn+' 台 × '+fmt(res.capdev,0)+' TB 满足寿命 '+fmt(res.elife,1)+' 年，实际可保留 '+fmt(res.effWinHave,1)+' h</p>';
+  }
+  if(withStore && res.use>0 && Number.isFinite(res.effWinHave)){
+    const days=(PRESETS[+$("scen").value||0]||{}).days||0;
+    if(days>0 && res.effWinHave < days*24) h+='<p class="bad" style="margin:6px 0 2px">⚠ 实际保留窗口 '+fmt(res.effWinHave,1)+' h ＜ 场景建议 '+days+' 天：超时会话会 miss，真实命中率与收益将低于当前值</p>';
   }
   if(note) h+='<p class="hint'+(scNote?" bad":"")+'" style="margin:6px 0 2px">'+note+'</p>';
   const cat=l=>/命中率|命中读回|IOPS|窗口反推式|每请求新增|可保存前缀数|设备读回带宽|上下文分段/.test(l)?"more"
@@ -623,14 +631,14 @@ function outTable(res,withStore,note,scNote){
   return h;
 }
 
-function compare(A,B,note){
+function compare(A,B,note,noCache){
   const box=$("cmp");
   if(!A.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
   const dλ=A.lam>0?100*(B.lam/A.lam-1):NaN, dC=A.capAll>0?100*(B.capAll/A.capAll-1):NaN, dT=A.tokps>0?100*(B.tokps/A.tokps-1):NaN;
   const line=(lbl,a,b,d)=>'<tr><td>'+lbl+'</td><td>'+a+'</td><td>'+b+'</td><td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+(Number.isFinite(d)?(d>=0?"+":"")+d.toFixed(1)+"%":"–")+'</td></tr>';
   const aB=A.best.bnd, bB=B.best.bnd;
   let conclude;
-  if(note&&/无设备|命中率/.test(note)) conclude="没有可用的前缀缓存（命中率 0 或设备带宽为 0）：B 退化为与 A 相同，收益为 0。";
+  if(noCache) conclude="没有可用的前缀缓存（命中率 0 或设备带宽为 0）：B 退化为与 A 相同，收益为 0。";
   else if(dλ>1) conclude="KV 缓存带来正向收益：到达率 <b>+"+dλ.toFixed(1)+"%</b>、并发 <b>"+(dC>=0?"+":"")+dC.toFixed(1)+"%</b>。省掉的重算 = 命中率 "+(100*B.use).toFixed(1)+"% 的 prefill；瓶颈从「"+aB+"」变为「"+bB+"」。";
   else if(Math.abs(dλ)<=1) conclude="两者到达率基本相同：瓶颈在「"+aB+"」，即便省掉 "+(100*B.use).toFixed(1)+"% 的 prefill 也不能再提高 λ；此时 KV 缓存的价值在降低 TTFT 与减少算力占用。";
   else conclude="KV 缓存反而更差（"+dλ.toFixed(1)+"%）：设备读回带宽/IOPS 成为新瓶颈（"+bB+"），原本「"+aB+"」的瓶颈被换掉了。";
@@ -639,7 +647,7 @@ function compare(A,B,note){
    line("到达率 λ（req/s）",fmt(A.lam),fmt(B.lam),dλ)+
    line("并发上限（条）",fmt(A.capAll),fmt(B.capAll),dC)+
    line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
-   '<tr><td>P / D 配比</td><td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td></tr>'+
+   '<tr><td>P / D 配比</td>'+(A.best.nP==null?'<td>混部</td><td>混部</td><td>–</td>':'<td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td>')+'</tr>'+
    '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
    (B.totBW>0?'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>':'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>–（未配置设备）</td><td>–</td></tr>')+
    '</table><div class="note-box">'+conclude+'</div>';
@@ -677,7 +685,7 @@ function recalc(){
   $("a_out").innerHTML=outTable(A,false,"");
   $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note)
     :('<div class="res-h"><h2>二、有 KV 缓存存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
-  compare(A,B,note);
+  compare(A,B,note,(b.use<=0||!hasDev));
 }
 
 /* ---------- 初始化 ---------- */
