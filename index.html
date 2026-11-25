@@ -121,8 +121,8 @@ details.assume ul b{color:var(--sub)}
 </head>
 <body>
 <main>
-<div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.2</span></div>
-<p class="subline">按物理规格推算 · 左栏为参数，右侧分别为「无缓存（前缀全量重算）」与「有缓存（前缀命中不重算）」的服务能力，两栏同一套算法</p>
+<div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.3</span></div>
+<p class="subline">按物理规格推算 · 左栏为参数；右侧三栏依次为「完全重算」「HBM+L2 缓存」「HBM+L2+KV 存储」，同一套算法</p>
 
 <div class="layout">
   <aside>
@@ -133,6 +133,7 @@ details.assume ul b{color:var(--sub)}
         <div class="f"><label><b>每节点 GPU 数</b></label><input id="g" type="number" value="8" min="1" step="1"></div>
         <div class="f" style="grid-column:1/-1"><div id="gpuhint" style="font-size:15px;font-weight:700;color:var(--ink)"></div></div>
         <div class="f" style="grid-column:1/-1"><label><b>GPU 型号</b></label><select id="gpu"></select><div class="hint" id="gpumodelhint"></div></div>
+        <div class="f" style="grid-column:1/-1"><label><b>L2 本地内存</b>（TB/节点）</label><input id="l2tb" type="number" value="1" step="1" min="0"><div class="hint" id="l2hint"></div></div>
         <div class="f"><label><b>单卡 HBM 显存</b>（GB）</label><input id="hbm" type="number" value="144" step="1" min="1"></div>
         <div class="f"><label><b>单卡 HBM 带宽</b>（TB/s）</label><input id="hbmbw" type="number" value="3.35" step="0.05" min="0.1"></div>
         <div class="f" style="grid-column:1/-1"><label><b>单 GPU 算力</b>（PF 稠密）</label><input id="pf" type="number" value="0.7" step="0.01" min="0.01"><div class="hint" id="pfhint"></div></div>
@@ -194,6 +195,7 @@ details.assume ul b{color:var(--sub)}
 
   <div class="results">
     <div id="a_out" class="card res-card"></div>
+    <div id="c_out" class="card res-card c"></div>
     <div id="b_out" class="card res-card b"></div>
     <div id="cmp" class="card"></div>
   </div>
@@ -201,21 +203,23 @@ details.assume ul b{color:var(--sub)}
 
 <details class="assume"><summary>计算口径与假设</summary>
 <ul>
-<li><b>无存储（A）</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
-<li><b>有存储（B）</b>：命中率 <b>use = 历史前缀 ÷（历史+新增）</b>，prefill 只重算 <b>(1−use)</b> 的新增前缀；命中前缀 KV 从设备读回 HBM 一次，decode 阶段两场景 KV 都在 HBM。</li>
-<li><b>写入</b> = 新增前缀 + 本轮 decode 增量（输出 token KV，由 D 实例产生并最终落盘，成为下一轮的历史前缀）；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底（= 期待寿命 × 日均写入 ÷ DWPD ÷ 5 年）；<b>日均写入</b> = 未命中前缀写入 × 86400 × 忙闲系数 w；<b>寿命</b> = DWPD×选中容量×5 年÷日均写入。</li>
-<li><b>保留窗口是派生值</b>（现有容量 ÷ 写入速率），不作为输入；容量需求由「期待寿命 + DWPD + 日均写入」反推。预设里的“建议 KV 保留 X 天”只是提示。</li>
-<li><b>选型次序</b>：先挑 TTFT 达标（prefill ≤ 目标）的实例组合，再在其中取吞吐最高；若无组合达标，退回吞吐最高并显式提示「无组合满足 TTFT」。</li>
-<li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读延迟（延迟只影响 TTFT 判断）。</li>
+<li><b>① 完全重算</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
+<li><b>② HBM+L2</b>：HBM（GPU 显存）与 L2（每节点 DRAM，输入 TB/节点）先承接复用；命中不重算，未命中按完整前缀重算。无存储设备。</li>
+<li><b>③ HBM+L2+KV 存储</b>：在②之上加存储，只有 HBM/L2 都留不住的前缀才从设备读回；写入 = 未命中新前缀 + 输出增量。</li>
+<li><b>分层命中拆分</b>：按「容量 ÷ 写入速率」算每层保留时间 R，取 <b>p=1−exp(−R/5min)</b>（会话复用间隔固定 5 min，来自 production 轨迹的中位 55 s / p99 4 h，取其中值偏保守）；HBM 份额 = h·p<sub>HBM</sub>，L2 份额 = h·(p<sub>L2</sub>−p<sub>HBM</sub>)，存储份额 = h·(p<sub>存储</sub>−p<sub>L2</sub>)。</li>
+<li><b>use</b> = 命中不重算的比例（历史前缀 ÷ 前缀合计）；③ 的存储读回只对「只有存储留得住」的那部分计，HBM/L2 命中不占设备带宽。</li>
+<li><b>写入</b> = 新增前缀 + 本轮 decode 增量；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底；<b>保留窗口</b> = 现有容量 ÷ 写入速率（派生值）。</li>
+<li><b>选型次序</b>：先满足 TTFT 目标，再取有效供给（supply ÷ 形状惩罚）最大的实例组合；若无组合达标，退回吞吐最高并显式提示。</li>
+<li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(存储读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读尾延迟（延迟只影响 TTFT 判断）。</li>
 <li><b>λ 是饱和上限</b>（零排队稳态点），不是可售配额；它未计突发与故障切换，商用容量建议再乘 0.6–0.8 的利用率系数。</li>
 <li><b>MoE 的 decode 权重读</b>按「专家并集」近似：每步权重 ≈ W·(1−(1−A/W)^B)，dense 模型（A≈W）退化为全权重；真实路由偏斜会让并集更快饱和，因此 MoE 的 D 池能力仍可能偏乐观。</li>
-<li>未建模 <b>P→D 的 KV 迁移</b>（RDMA 带宽/延迟）与 MoE 大 batch 下的专家权重读放大，长上下文 MoE 场景的 D 池能力可能偏乐观。</li>
-<li>无需求参数：两栏都是固定总节点、以“最大化到达率”搜索 P/D 配比，输出客观服务能力上限。</li>
+<li>未建模 <b>P→D 的 KV 迁移</b>（RDMA 带宽/延迟）与 L2 读回带宽竞争；L2 命中按「不占设备带宽」处理。</li>
 </ul></details>
 </main>
 <script>
 const $=id=>document.getElementById(id);
 const MFU=0.5, UTIL=0.9, DWPD_YEARS=5, _dscCache=new Map();
+const T_GAP=300;   // 会话平均复用间隔（秒）
 const NV_DOMAIN_GPUS=256, NV_BW=900, RDMA_TBPS=3.2, RDMA_BW=RDMA_TBPS*1000/8, NV_LINK_EFF=0.90, PP_PEN=1/8;
 const COMM_SHARE=0.35;
 const GCACHE=new Map();
@@ -386,17 +390,18 @@ function readBase(){
   const bs=+$("bstart").value||0, be=+$("bend").value||0, bl=+$("bload").value||0, il=+$("iload").value||0;
   const busyH=be>bs?be-bs:(be<bs?24-bs+be:0), w=(busyH*(bl/100)+(24-busyH)*(il/100))/24;   // 支持跨零点班次
   const pd=true;   // 固定按 PD 分离计算
+  const l2tb=Math.max(0,+$("l2tb").value||0);
   const use=prefix>0?Math.min(1,hist/prefix):0;                        // 历史前缀占比 = 命中率
-  return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,pd};
+  return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,l2tb,pd};
 }
 
 /* ---------- 单场景：最大化 λ 的 P/D 划分 ---------- */
 /* sc = {store:bool, devBW, devIOPS, blk}；命中率来自 b.use（历史前缀占比） */
 function pickSplit(b,sc){
   const {m,g,hbm,pf,nodes,legal,dwell,S_pfx,W,A_GB,ttft,fl,bwH,S,nout}=b;
-  const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0;
+  const use=sc.forceUse!=null?Math.min(1,Math.max(0,sc.forceUse)):((sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0);
   const flEff=fl*(1-use);
-  const readPerReq=use*S_pfx;
+  const readPerReq=Math.min(1,Math.max(0,sc.devShare||0))*S_pfx;
   const build=(nP,nD)=>{
     if(nP<1||nD<1) return null;
     const pP=supplyAt(m,g,hbm,pf,flEff,nP,nodes,legal,ttft,W); if(!pP||pP.supply<=0) return null;
@@ -450,8 +455,8 @@ function pickSplit(b,sc){
 /* ---------- 混部（节点不足以拆分 P/D 池时回退） ---------- */
 function evalMixed(b,sc,withStore){
   const {m,g,hbm,pf,nodes,legal,dwell,nout,S,S_pfx,W,bwH,ttft,fl}=b;
-  const use=(sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0;
-  const flEff=fl*(1-use), readPerReq=use*S_pfx, decFL=2*m.P*1e9*nout;
+  const use=sc.forceUse!=null?Math.min(1,Math.max(0,sc.forceUse)):((sc.store&&sc.devBW>0)?Math.min(1,Math.max(0,b.use)):0);
+  const flEff=fl*(1-use), readPerReq=Math.min(1,Math.max(0,sc.devShare||0))*S_pfx, decFL=2*m.P*1e9*nout;
   const dwpd=Math.max(0.01,+$("dwpd").value||1), elife=Math.max(0.5,+$("elife").value||3);
   const capdev=Math.max(0.1,+$("capdev").value||384), devsIn=Math.max(0,Math.round(+$("devs").value||0)), totBW=Math.max(0,+$("bwdev").value||0)*devsIn;
   let best=null;
@@ -496,7 +501,7 @@ function evalMixed(b,sc,withStore){
   const stallMs = instPrefillTokps>0 ? 1000*chunkTok/instPrefillTokps : 0;
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
   const itlMs=1000/b.tps+stallMs;                                 // 平均 + chunk 阻塞
-  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
+  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
     duty,stallMs,itlMs,
     wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
     prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
@@ -529,17 +534,66 @@ function evalScene(b,sc,withStore){
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/Math.max(1,totBW-wrMiss)):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+  return {ok:true,pd:true,best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000,
           dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
 }
 
 /* ---------- 渲染 ---------- */
-function outTable(res,withStore,note,scNote){
-  const title=withStore?"有 KV 缓存存储":"无 KV 缓存存储";
-  const sub=withStore?"前缀命中不重算":"前缀全部重算";
-  if(!res.ok) return '<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span></div><p class="bad" style="font-weight:700;margin-top:8px">当前规格无法部署：权重装不下，或没有合法 TP×PP 组合。</p>';
+/* ---------- 分层：HBM / L2 / 存储 命中拆分 ---------- */
+function tierShares(b,res,l2tb){
+  const isMix=res.pd===false;
+  const inst=isMix?res.inst:(res.best&&res.best.dP);
+  if(!inst) return {hH:0,hL:0,hS:0,pH:0,pL:0,pS:0,RH:0,RL:0,capH:0,capL:0,slots:0};
+  const rep=isMix?((inst.g&&inst.g.rep)||1):(inst.rep||1);
+  const slots=Math.max(0,isMix?inst.perMem:inst.memMax);
+  const capH=slots*rep*b.S;                                   // GB / 实例
+  const wrInst=res.wrMiss/Math.max(1,inst.k);
+  const RH=wrInst>0?capH/wrInst:0;
+  const capL=Math.max(0,l2tb||0)*1000*inst.s;                  // GB / 实例（TB/节点 × 节点数）
+  const RL=wrInst>0?capL/wrInst:0;
+  const pOf=R=>R>0?1-Math.exp(-R/T_GAP):0;
+  const pH=pOf(RH), pL=pOf(RL), pS=res.effWinHave>0?pOf(res.effWinHave*3600):0;   // effWinHave 单位为小时
+  const h=Math.min(1,Math.max(0,b.use||0));
+  const hH=h*Math.min(1,pH);
+  const hL=h*Math.max(0,Math.min(1,pL)-Math.min(1,pH));
+  const hS=h*Math.max(0,Math.min(1,pS)-Math.min(1,pL));
+  return {hH,hL,hS,pH,pL,pS,RH,RL,capH,capL,slots};
+}
+function evalTier(b,sc,withStore,l2tb,mode){
+  let use=0,out=null,sh=null;
+  for(let i=0;i<4;i++){
+    out=evalScene(b,Object.assign({},sc,{forceUse:use,devShare:(mode==="store"&&sh)?sh.hS:0}),withStore);
+    if(!out.ok) return out;
+    sh=tierShares(b,out,l2tb);
+    const nx=(mode==="none")?0:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL);
+    const clamped=Math.min(b.use,Math.max(0,nx));
+    if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
+    use=clamped;
+  }
+  out.tiers=sh; out.useMode=mode; return out;
+}
+function evalMixedTier(b,sc,withStore,l2tb,mode){
+  let use=0,out=null,sh=null;
+  for(let i=0;i<4;i++){
+    out=evalMixed(b,Object.assign({},sc,{forceUse:use,devShare:(mode==="store"&&sh)?sh.hS:0}),withStore);
+    if(!out.ok) return out;
+    sh=tierShares(b,out,l2tb);
+    const nx=(mode==="none")?0:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL);
+    const clamped=Math.min(b.use,Math.max(0,nx));
+    if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
+    use=clamped;
+  }
+  out.tiers=sh; out.useMode=mode; return out;
+}
+
+function outTable(res,withStore,note,scNote,mode){
+  const md=mode||(withStore?"store":"none");
+  const NUM={none:"一",tier:"二",store:"三"}[md];
+  const title={none:"无 KV 缓存存储",tier:"HBM+L2 缓存",store:"HBM+L2 缓存 + KV 存储"}[md];
+  const sub={none:"前缀全部重算",tier:"HBM/L2 命中不重算",store:"前缀命中不重算"}[md];
+  if(!res.ok) return '<div class="res-h"><h2>'+NUM+'、'+title+'</h2><span class="tag">'+sub+'</span></div><p class="bad" style="font-weight:700;margin-top:8px">当前规格无法部署：权重装不下，或没有合法 TP×PP 组合。</p>';
   const s=res.best;
   const s2=s;
   const pG=res.pd===false?"":('TP'+s2.pP.g.tp+'×PP'+s2.pP.g.pp), dG=res.pd===false?"":('TP'+s2.dP.g.tp+'×PP'+s2.dP.g.pp);
@@ -566,6 +620,11 @@ function outTable(res,withStore,note,scNote){
     })():'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
+  if(md==="tier"){ const t=res.tiers||{};
+    rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ L2 "+(100*(t.hL||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
+    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/实例 · "+fmt((t.RH||0)/60,1)+" min（按 5 min 复用间隔折算）"]);
+    if((res.l2tb||0)>0) rows.push(["L2 可驻留 / 保留","约 "+fmt(t.capL||0)+" GB/实例 · "+fmt((t.RL||0)/60,1)+" min（"+(res.l2tb)+" TB/节点）"]);
+  }
   if(res.pd===false){
     const I=res.inst, gG='TP'+I.g.tp+'×PP'+I.g.pp;
     rows.push(["推荐实例组合","每实例 "+I.s+" 节点 × "+I.k+" 个实例（共 "+I.used+" 节点；"+gG+"；每实例 "+I.perSt+" 条并发）"]);
@@ -601,7 +660,10 @@ function outTable(res,withStore,note,scNote){
     const ioNeed=io>0&&res.totBW>0?(res.lam*((res.readPerReq+res.perReqWrite)*1e9/128/1024)):0;   // 读+写合计块数
     rows.push(["IOPS 占用",io>0?(fmt(ioNeed)+" / "+fmt(io)+"（"+(ioNeed>0?(100*ioNeed/io).toFixed(0)+"%":"–")+"）"):"未填（不约束）"]);
   }
-  let h='<div class="res-h"><h2>'+(withStore?"二":"一")+'、'+title+'</h2><span class="tag">'+sub+'</span>'+(withStore?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
+  const tier=res.tiers||{};
+ let h='<div class="res-h"><h2>'+NUM+'、'+title+'</h2><span class="tag">'+sub+'</span>'+
+   (md==="tier"?'<span class="tag">HBM '+(100*(tier.hH||0)).toFixed(0)+'% · L2 '+(100*(tier.hL||0)).toFixed(0)+'%</span>':'')+
+   (md==="store"?'<span class="tag">命中 '+(100*res.use).toFixed(0)+'%</span>':'')+'</div>';
   h+=kpi;
   if(res.pd!==false && s2 && s2.pP && s2.dP){
     const tps=fmt(+$("tps").value||0,0);
@@ -634,34 +696,37 @@ function outTable(res,withStore,note,scNote){
   h+=tb(g.perf);
   if(g.store.length) h+='<div class="ogt">'+(withStore?"存储":"负载")+'</div>'+tb(g.store);
   if(g.more.length) h+='<details class="more"><summary>更多指标</summary>'+tb(g.more)+'</details>';
-  if(!withStore) h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；「KV 产生速率」是若必须落盘时需要接住的量。</p>';
+  if(md==="none") h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；「KV 产生速率」是若必须落盘时需要接住的量。</p>';
+  if(md==="tier") h+='<p class="hint" style="margin-top:8px">本场景无存储设备：HBM/L2 命中不重算，未命中按完整 prefill 重算；容量/寿命/设备台数不适用。</p>';
   return h;
 }
 
-function compare(A,B,note,noCache){
+function compare(A,C,B,note,noCache){
   const box=$("cmp");
-  if(!A.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
-  const dλ=A.lam>0?100*(B.lam/A.lam-1):NaN, dC=A.capAll>0?100*(B.capAll/A.capAll-1):NaN, dT=A.tokps>0?100*(B.tokps/A.tokps-1):NaN;
-  const line=(lbl,a,b,d)=>'<tr><td>'+lbl+'</td><td>'+a+'</td><td>'+b+'</td><td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+(Number.isFinite(d)?(d>=0?"+":"")+d.toFixed(1)+"%":"–")+'</td></tr>';
-  const aB=A.best.bnd, bB=B.best.bnd;
-  let conclude;
-  if(noCache) conclude="没有可用的前缀缓存（命中率 0 或设备带宽为 0）：B 退化为与 A 相同，收益为 0。";
-  else if(dλ>1) conclude="KV 缓存带来正向收益：到达率 <b>+"+dλ.toFixed(1)+"%</b>、并发 <b>"+(dC>=0?"+":"")+dC.toFixed(1)+"%</b>。省掉的重算 = 命中率 "+(100*B.use).toFixed(1)+"% 的 prefill；瓶颈从「"+aB+"」变为「"+bB+"」。";
-  else if(Math.abs(dλ)<=1) conclude="两者到达率基本相同：瓶颈在「"+aB+"」，即便省掉 "+(100*B.use).toFixed(1)+"% 的 prefill 也不能再提高 λ；此时 KV 缓存的价值在降低 TTFT 与减少算力占用。";
-  else conclude="KV 缓存反而更差（"+dλ.toFixed(1)+"%）：设备读回带宽/IOPS 成为新瓶颈（"+bB+"），原本「"+aB+"」的瓶颈被换掉了。";
+  if(!A.ok||!C.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
+  const pct=(x,y)=>y>0?100*(x/y-1):NaN;
+  const d1=pct(B.lam,A.lam), d2=pct(B.lam,C.lam);
+  const c1=pct(B.capAll,A.capAll), c2=pct(B.capAll,C.capAll);
+  const t1=pct(B.tokps,A.tokps), t2=pct(B.tokps,C.tokps);
+  const pc=(d)=>Number.isFinite(d)?(d>=0?"+":"")+d.toFixed(1)+"%":"–";
+  const cell=(d)=>'<td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+pc(d)+'</td>';
+  const pdCell=(x)=>x.best&&x.best.nP!=null?(x.best.nP+" / "+x.best.nD):"混部";
   box.innerHTML='<h2>收益对比</h2>'+
-   '<table class="cmp-tb"><tr><th>指标</th><th>无 KV 缓存（全量重算）</th><th>有 KV 缓存（命中不重算）</th><th>差异</th></tr>'+
-   line("到达率 λ（req/s）",fmt(A.lam),fmt(B.lam),dλ)+
-   line("并发上限（条）",fmt(A.capAll),fmt(B.capAll),dC)+
-   line("token 吞吐（tok/s）",fmt(A.tokps),fmt(B.tokps),dT)+
-   '<tr><td>P / D 配比</td>'+(A.best.nP==null?'<td>混部</td><td>混部</td><td>–</td>':'<td>'+A.best.nP+" / "+A.best.nD+'</td><td>'+B.best.nP+" / "+B.best.nD+'</td><td>'+(B.best.nP-A.best.nP)+" / "+(B.best.nD-A.best.nD)+'</td>')+'</tr>'+
-   '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>prefill ×'+((1-B.use)).toFixed(2)+'</td></tr>'+
-   (B.totBW>0?'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>'+(B.devsNeed>B.devsIn?"设备台数不足":"台数够")+'</td></tr>':'<tr><td>容量 / 台数</td><td>–（无存储）</td><td>–（未配置设备）</td><td>–</td></tr>')+
-   '</table><div class="note-box">'+conclude+'</div>';
+   '<table class="cmp-tb"><tr><th>指标</th><th>① 完全重算</th><th>② HBM+L2</th><th>③ +KV 存储</th><th>③/①</th><th>③/②</th></tr>'+
+   '<tr><td>到达率 λ（req/s）</td><td>'+fmt(A.lam)+'</td><td>'+fmt(C.lam)+'</td><td>'+fmt(B.lam)+'</td>'+cell(d1)+cell(d2)+'</tr>'+
+   '<tr><td>并发上限（条）</td><td>'+fmt(A.capAll)+'</td><td>'+fmt(C.capAll)+'</td><td>'+fmt(B.capAll)+'</td>'+cell(c1)+cell(c2)+'</tr>'+
+   '<tr><td>token 吞吐（tok/s）</td><td>'+fmt(A.tokps)+'</td><td>'+fmt(C.tokps)+'</td><td>'+fmt(B.tokps)+'</td>'+cell(t1)+cell(t2)+'</tr>'+
+   '<tr><td>P / D 配比</td><td>'+pdCell(A)+'</td><td>'+pdCell(C)+'</td><td>'+pdCell(B)+'</td><td>–</td><td>–</td></tr>'+
+   '<tr><td>省掉的重算</td><td>0%</td><td>'+(100*C.use).toFixed(1)+'%</td><td>'+(100*B.use).toFixed(1)+'%</td><td>–</td><td>–</td></tr>'+
+   (B.totBW>0?'<tr><td>容量 / 台数</td><td>–</td><td>–</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>–</td><td>–</td></tr>':'')+
+   '</table><div class="note-box"><b>存储净收益（③ vs ①）</b>：到达率 '+pc(d1)+'、并发 '+pc(c1)+'。'+
+   '<br><b>存储边际收益（③ vs ②）</b>：到达率 '+pc(d2)+'、并发 '+pc(c2)+'。'+
+   (noCache?'<br>没有可用的前缀缓存：②③ 退化为 ①。':'')+
+   (note?'<br><span class="hint">'+note+'</span>':'')+'</div>';
 }
 
 /* ---------- 主流程 ---------- */
-let LAST_A=null, LAST_B=null;
+let LAST_A=null, LAST_B=null, LAST_C=null;
 
 /* ---------- 主流程 ---------- */
 function recalc(){
@@ -675,25 +740,35 @@ function recalc(){
   $("ctxhint").textContent="前缀合计 "+(b.prefix).toLocaleString()+" + 输出 "+b.nout.toLocaleString()+" token（模型上限 "+capTok.toLocaleString()+"）"+((b.prefix+b.nout)>capTok?" ⚠ 超出（含输出）":"");
   $("whint").textContent="24h 负荷系数 w = "+(100*b.w).toFixed(1)+"%（影响日均写入、寿命与磨损保底容量）"+(b.busyH===0?"；起止相同按 0 小时繁忙计":"");
   $("devhint").textContent="总带宽 = "+fmt(bwdev*devsIn)+" GB/s";
+  $("l2hint").textContent=b.l2tb>0?("集群 L2 合计 "+fmt(b.l2tb*(b.nodes||0),0)+" TB（"+b.l2tb+" TB/节点；按 5 min 复用间隔折算命中）"):"0 = 关闭 L2（只算 HBM 命中）";
   const gTot=(b.nodes||0)*(b.g||0);
   $("gpuhint").innerHTML="共 <span style=\"font-size:19px\">"+fmt(gTot,0)+"</span> 张 GPU（"+(b.nodes||0)+" 节点 × "+(b.g||0)+"）";
   let note="";
   if(b.use<=0) note="历史前缀为 0：没有可命中的前缀，收益为 0。";
   else if(tot<=0) note="没有可用设备带宽：命中前缀读不回来，B 与 A 相同（收益 0）。";
-  let A=null, B=null, pdOK=b.nodes>=2;
+  let A=null, C=null, B=null, pdOK=b.nodes>=2;
   const hasDev=tot>0;                                            // 无设备带宽时 B 退化为 A
-  if(pdOK){ A=evalScene(b,{store:false,devBW:0,devIOPS:0,blk},false); B=evalScene(b,{store:hasDev,devBW:tot,devIOPS:iops,blk},hasDev); if(!A.ok||!B.ok) pdOK=false; }
+  const sc0={store:false,devBW:0,devIOPS:0,blk};
+  const scS={store:hasDev,devBW:tot,devIOPS:iops,blk};
+  if(pdOK){
+    A=evalTier(b,sc0,false,b.l2tb,"none");
+    C=evalTier(b,sc0,false,b.l2tb,"tier");
+    B=hasDev?evalTier(b,scS,hasDev,b.l2tb,"store"):evalTier(b,sc0,false,b.l2tb,"none");
+    if(!A.ok||!C.ok||!B.ok) pdOK=false;
+  }
   if(!pdOK){                                                    // 节点不足以拆分 P/D 池 → 回退混部
     note="节点数不足以拆分 P/D 池（需 ≥2 节点），已按混部实例计算。";
-    A=evalMixed(b,{store:false,devBW:0,devIOPS:0,blk},false);
-    B=evalMixed(b,{store:hasDev,devBW:tot,devIOPS:iops,blk},hasDev);
+    A=evalMixedTier(b,sc0,false,b.l2tb,"none");
+    C=evalMixedTier(b,sc0,false,b.l2tb,"tier");
+    B=hasDev?evalMixedTier(b,scS,hasDev,b.l2tb,"store"):evalMixedTier(b,sc0,false,b.l2tb,"none");
   }
   if(b.use<=0 && B && B.ok && String(B.best.bnd||"").startsWith("设备")) note+="缓存仍需吸收全部前缀写入，λ 受设备带宽（读+写）约束。";
-  LAST_A=A; LAST_B=B;
-  $("a_out").innerHTML=outTable(A,false,"");
-  $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note)
-    :('<div class="res-h"><h2>二、有 KV 缓存存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
-  compare(A,B,note,(b.use<=0||!hasDev));
+  LAST_A=A; LAST_C=C; LAST_B=B;
+  $("a_out").innerHTML=outTable(A,false,"",false,"none");
+  $("c_out").innerHTML=outTable(C,false,"",false,"tier");
+  $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note,"store")
+    :('<div class="res-h"><h2>三、HBM+L2 缓存 + KV 存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
+  compare(A,C,B,note,(b.use<=0||!hasDev));
 }
 
 /* ---------- 初始化 ---------- */
