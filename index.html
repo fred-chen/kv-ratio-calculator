@@ -637,7 +637,7 @@ function outTable(res,withStore,note,scNote,mode){
   const s=res.best;
   const s2=s;
   const dpMode=/DP/.test(String(res.deploy||""));
-  const pG=res.pd===false?"":(dpMode?"DP+EP"+Math.round(s2.pP.used*$("g").value||0):('TP'+s2.pP.g.tp+'×PP'+s2.pP.g.pp)), dG=res.pd===false?"":(dpMode?"DP+EP"+Math.round(s2.dP.used*$("g").value||0):('TP'+s2.dP.g.tp+'×PP'+s2.dP.g.pp));
+  const pG=res.pd===false?"":(dpMode?"DP+EP"+res.epCards:('TP'+s2.pP.g.tp+'×PP'+s2.pP.g.pp)), dG=res.pd===false?"":(dpMode?"DP+EP"+res.epCards:('TP'+s2.dP.g.tp+'×PP'+s2.dP.g.pp));
   const idle=res.pd===false?Math.max(0,Math.round(+$("nodes").value||0)-s2.used):Math.max(0,Math.round(+$("nodes").value||0)-s2.nP-s2.nD);
   const ttftOver=res.ttftEff>Math.max(1,+$("ttft").value||500);
   const kpi='<div class="kpis">'+
@@ -808,7 +808,7 @@ function deployVariants(b){
     const W=b.W||0, expF=Math.min(0.999,Math.max(0,b.expF||0.95)), Wex=W*expF, Wat=W-Wex;
     const Aex=Math.max(0,(b.A_GB||0)-Wat);
     const pen=(cards>=128?0.65:(cards>=32?0.8:0.9));
-    vs.push({b:Object.assign({},b,{W:cards*Wat+Wex,A_GB:cards*Wat+Aex,legal:[{s:s,g0:{tp:1,pp:1,rep:1}}],pf:b.pf*pen,bwH:b.bwH*pen}),tag:"DP+EP"+cards});
+    vs.push({b:Object.assign({},b,{W:cards*Wat+Wex,A_GB:cards*Wat+Aex,legal:[{s:s,g0:{tp:1,pp:1,rep:1}}],pf:b.pf*pen,bwH:b.bwH*pen,epCards:cards}),tag:"DP+EP"+cards});
   });
   return vs;
 }
@@ -816,7 +816,7 @@ function evalTierBest(b,sc,withStore,l2tb,mode){
   let best=null,btag="";
   deployVariants(b).forEach(function(v){
     const r=evalTier(v.b,sc,withStore,l2tb,mode);
-    if(r&&(!best||((r.ok?1:0)>(best.ok?1:0))||((r.ok===best.ok)&&r.lam>best.lam))){best=r;btag=v.tag;}
+    if(r&&(!best||((r.ok?1:0)>(best.ok?1:0))||((r.ok===best.ok)&&r.lam>best.lam))){best=r;btag=v.tag;if(v.b.epCards)best.epCards=v.b.epCards;}
   });
   if(best) best.deploy=btag;
   return best;
@@ -825,7 +825,7 @@ function evalMixedTierBest(b,sc,withStore,l2tb,mode){
   let best=null,btag="";
   deployVariants(b).forEach(function(v){
     const r=evalMixedTier(v.b,sc,withStore,l2tb,mode);
-    if(r&&(!best||((r.ok?1:0)>(best.ok?1:0))||((r.ok===best.ok)&&r.lam>best.lam))){best=r;btag=v.tag;}
+    if(r&&(!best||((r.ok?1:0)>(best.ok?1:0))||((r.ok===best.ok)&&r.lam>best.lam))){best=r;btag=v.tag;if(v.b.epCards)best.epCards=v.b.epCards;}
   });
   if(best) best.deploy=btag;
   return best;
