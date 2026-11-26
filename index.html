@@ -657,7 +657,7 @@ function outTable(res,withStore,note,scNote,mode){
     })():'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
-  rows.push(["单请求 KV","前缀 "+fmt(res.S_pfx)+" GB ｜ 含输出 "+fmt(res.S)+" GB（"+(res.prefix||0).toLocaleString()+" + "+(res.nout||0).toLocaleString()+" token）"]);
+  rows.push(["单请求 KV","前缀 "+fmt(res.S_pfx,2)+" GB ｜ 含输出 "+fmt(res.S,2)+" GB（"+(res.prefix||0).toLocaleString()+" + "+(res.nout||0).toLocaleString()+" token）"]);
   if(md==="hbm"){ const t=res.tiers||{};
     rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
     rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/P 池 · "+fmt((t.RH||0)/60,1)+" min（按层双桶折算）"]);
