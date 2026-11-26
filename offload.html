@@ -814,7 +814,7 @@ function applyPreset(){
 }
 
 {const ms=$("model"); MODELS.forEach((m,i)=>{const o=document.createElement("option");o.value=i;o.textContent=m.n;ms.appendChild(o);});
- ms.value=String(MODELS.findIndex(m=>m.n.indexOf("Qwen3.8-2.4T")>=0));}
+ ms.value=String(MODELS.findIndex(m=>m.n.indexOf("GLM-5.3")>=0));}
 {const gs=$("gpu"); GPUS.forEach((x,i)=>{const o=document.createElement("option");o.value=i;o.textContent=x[0];gs.appendChild(o);}); gs.value="0";}
 {const ss=$("scen"); PRESETS.forEach((p,i)=>{const o=document.createElement("option");o.value=i;o.textContent=p.n;ss.appendChild(o);}); ss.value="0";}
 modelSync(); gpuSync(); modelSync(); applyPreset();
