@@ -531,7 +531,7 @@ function evalMixed(b,sc,withStore){
   const stallMs = instPrefillTokps>0 ? 1000*chunkTok/instPrefillTokps : 0;
   const duty=lam>0?Math.min(1,lam*flEff*best.fac/Math.max(1e-9,best.used*g*pf*MFU*1e15)):0;
   const itlMs=1000/b.tps+stallMs;                                 // 平均 + chunk 阻塞
-  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
+  return {ok:true,pd:false,best,inst:best,S_pfx:b.S_pfx,S:b.S,sTok:b.sTok,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:best.lamRaw,capAll:best.capAll,dwell,tokps:lam*nout,prefTok,prefTokps:lam*prefTok,tps:b.tps,
     duty,stallMs,itlMs,
     wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,tRead,
     prefillMs:best.ttftMs,readMs:tRead*1000,outKV,perReqWrite,daily,withStore,use,
@@ -564,7 +564,7 @@ function evalScene(b,sc,withStore){
   // 设备带宽是 P 池共享：单个实例分到 totBW/pP.k，因此每请求读回时间 = readPerReq×k/totBW
   const tRead=(best.use>0&&totBW>0)?(best.readPerReq*best.pP.k/Math.max(1,totBW-wrMiss)):0;
   const prefTok=withStore?b.fresh:b.prefix, prefTokps=lam*prefTok;
-  return {ok:true,pd:true,best,S_pfx:b.S_pfx,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
+  return {ok:true,pd:true,best,S_pfx:b.S_pfx,S:b.S,sTok:b.sTok,A_GB:b.A_GB,W:b.W,l2tb:b.l2tb,lam,lamRaw:lam,capAll,dwell,tokps:lam*b.nout,prefTok,prefTokps,tps:b.tps,duty:0,speed:b.tps,itlMs:1000/b.tps,goodput:lam,wrRead,wrMiss,wcap,capFinal,lifeY,devsNeed,devsIn,capdev,totBW,capHave,effWinHave,lifeHave,capOK,lifeOK,bwOK,
           tRead,prefillMs:best.pP.tpfEff*1000,readMs:tRead*1000,l2PerReq:best.l2PerReq,l2Ms:best.l2Ms,outKV,perReqWrite,
           daily,withStore,use,svc:best.pP.tpfEff+tRead+best.l2Ms/1000+dwell,ttftEff:(best.pP.tpfEff+tRead)*1000+best.l2Ms,
           dwpd,elife,readPerReq:best.readPerReq,prefix:b.prefix,hist:b.hist,fresh:b.fresh,nout:b.nout};
@@ -657,6 +657,7 @@ function outTable(res,withStore,note,scNote,mode){
     })():'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
+  rows.push(["单请求 KV","前缀 "+fmt(res.S_pfx)+" GB ｜ 含输出 "+fmt(res.S)+" GB（"+(res.prefix||0).toLocaleString()+" + "+(res.nout||0).toLocaleString()+" token）"]);
   if(md==="hbm"){ const t=res.tiers||{};
     rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
     rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/P 池 · "+fmt((t.RH||0)/60,1)+" min（按层双桶折算）"]);
