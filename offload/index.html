@@ -753,18 +753,34 @@ function deployAdvice(b,B){
   const pP=B.best&&B.best.pP; const Pcap=pP&&pP.used>0?pP.supplyEff*(b.nodes/pP.used):0;
   const out=[];
   out.push({n:"TP+PP（当前）",lam:B.lam,b:2,note:String(B.best.bnd||"")});
-  const dcp=4, dLam=Math.min(Pcap>0?Pcap:Infinity, B.lam*dcp)*0.85;
-  out.push({n:"DCP="+dcp+"（SGLang）",lam:dLam,b:2*wdcp(dcp),note:"KV 按 "+dcp+" 份条带化，含 all-to-all 惩罚 15%"});
-  [32,128].forEach(function(ep){
-    const rep=Math.max(1,Math.round(cards/ep));
-    const wGPU=W*attnF + W*expF/Math.max(1,ep);
-    const memStreams=cards*Math.max(0,(b.hbm||144)*0.9-wGPU)/S;
-    const budget=cards*(b.bwH||3.35)*1000/tps;
-    const weightStep=rep*W*expF + cards*W*attnF;
-    const bwStreams=Math.max(0,budget-weightStep)/(S);
-    const pen=(ep>=128?0.65:0.8);
-    const lam=Math.min(Pcap>0?Pcap:Infinity, memStreams/dwell, bwStreams/dwell)*pen;
-    out.push({n:"DP+EP"+ep,lam:lam,b:2*ep,note:"每卡权重 "+fmt(wGPU)+" GB（注意力复制 + 专家/"+ep+"）"});
+  if(!(b.nodes>=16)) return out;
+  const dcp=4, perNodeP=Pcap>0?Pcap/b.nodes:0;
+  const perNodeDec=B.best&&B.best.dP&&B.best.dP.used>0?(B.lam*dwell/B.best.dP.used)*dcp:0;
+  let bestC=null;
+  for(let nD=8;nD<=(b.nodes-8);nD+=8){ const nP=b.nodes-nD;
+    const lam=Math.min(nP*perNodeP, nD*perNodeDec/dwell);
+    if(!bestC||lam>bestC.lam) bestC={lam,nP,nD};
+  }
+  out.push({n:"DCP="+dcp+"（SGLang）",lam:bestC.lam*0.85,b:2*wdcp(dcp),note:"P/D="+bestC.nP+"/"+bestC.nD+"，KV 按 "+dcp+" 份条带化，含 all-to-all 惩罚 15%"});
+  [32,128].forEach(function(ep0){
+    const perNode=Pcap>0?Pcap/b.nodes:0;      // P 侧每节点预fill供给
+    let bestD=null;
+    for(let nD=8;nD<=(b.nodes-8);nD+=8){
+      const nP=b.nodes-nD, cardsD=nD*b.g;
+      const ep=Math.min(ep0,cardsD);
+      const rep=Math.max(1,Math.round(cardsD/ep));
+      const wGPU=W*attnF + W*expF/Math.max(1,ep);
+      const memStreams=cardsD*Math.max(0,(b.hbm||144)*0.9-wGPU)/S;
+      const budget=cardsD*(b.bwH||3.35)*1000/tps;
+      const weightStep=rep*W*expF + cardsD*W*attnF;
+      const bwStreams=Math.max(0,budget-weightStep)/S;
+      const dec=Math.min(memStreams/dwell,bwStreams/dwell);
+      const lam=Math.min(nP*perNode,dec);
+      if(!bestD||lam>bestD.lam) bestD={lam,nP,nD,ep,wGPU};
+    }
+    const pen=(ep0>=128?0.65:0.8);
+    const lam=bestD.lam*pen;
+    out.push({n:"DP+EP"+ep0,lam:lam,b:2*ep0,note:"P/D="+bestD.nP+"/"+bestD.nD+"，每卡权重 "+fmt(bestD.wGPU)+" GB"});
   });
   out.sort((x,y)=>y.lam-x.lam);
   out[0].best=1;
@@ -776,7 +792,7 @@ function deployHTML(b,B){
   const a=deployAdvice(b,B);
   let h='<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px"><b>部署方案建议（估算）</b><table class="cmp-tb" style="margin-top:6px"><tr><th>方案</th><th>估算 λ</th><th>说明</th></tr>';
   a.forEach(r=>{ h+='<tr'+(r.best?' style="background:#f0fff4"':'')+'><td>'+(r.best?'✓ ':'')+r.n+'</td><td style="font-weight:700">'+fmt(r.lam)+'</td><td>'+r.note+'</td></tr>'; });
-  h+='</table><div class="hint" style="margin-top:6px">推荐 <b>'+a[0].n+'</b>：在 128 节点、当前模型/负载下估算 λ 最高。DCP 计入 15% all-to-all 开销；DP+EP 按“注意力每卡复制、专家/EP 分散”估算，未重新求解 P/D 配比，仅用于选型方向。</div></div>';
+  h+='</table><div class="hint" style="margin-top:6px">推荐 <b>'+a[0].n+'</b>：在 128 节点、当前模型/负载下估算 λ 最高。DCP 计入 15% all-to-all 开销；DP+EP 按“注意力每卡复制、专家/EP 分散”估算，DCP 与 DP+EP 均已按每节点供给/解码能力重解 P/D 配比，仍为估算，仅用于选型方向。</div></div>';
   return h;
 }
 
