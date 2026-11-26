@@ -887,6 +887,7 @@ $("model").addEventListener("change",()=>{modelSync();recalc();});
 $("bw").addEventListener("change",()=>{BW_LOCK=true;pfSync();recalc();});
 $("bk").addEventListener("change",()=>{BK_LOCK=true;recalc();});
 $("scen").addEventListener("change",()=>{applyPreset();recalc();});
+["hw","ht","ct","l2tb"].forEach(id=>$(id).addEventListener("change",recalc));
 
 document.querySelectorAll("input").forEach(e=>e.addEventListener("input",recalc));
 recalc();
