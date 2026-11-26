@@ -222,7 +222,7 @@ details.assume ul b{color:var(--sub)}
 <li><b>② HBM+L2</b>：HBM（GPU 显存）与 L2（每节点 DRAM，输入 TB/节点）先承接复用；命中不重算，未命中按完整前缀重算。无存储设备。</li>
 <li><b>③ HBM+L2+KV 存储</b>：在②之上加存储，只有 HBM/L2 都留不住的前缀才从设备读回；写入 = 未命中新前缀 + 输出增量。</li>
 <li><b>缓存容量归属</b>：HBM 前缀缓存按 <b>P 池</b>可用显存计（P 实例的总 HBM 0.9 − k×权重），L2 按 P 池节点的 host DRAM 计；②③ 各自重选 P/D，因此缓存容量随配比变化。</li>
-<li><b>KV 复制因子</b>：MLA 为每 TP rank 全量复制（F=TP）；GQA 为 F=max(1, TP/KV头数)（TP≤头数时按头切分、TP>头数时复制）；hybrid 因模型表缺层比例，暂按 1 计并标注口径待定。</li>
+<li><b>KV 复制因子</b>：MLA 的 <code>num_kv_heads=1</code>，TP>1 时 latent 在每个 rank 全量复制（F=TP）——vLLM 的 <code>is_kv_replicated</code> 即按“TP > KV 头数”判定，HuggingFace 的 MLA 部署说明也明确“TP replicates the latent cache on every rank”（<a href="https://github.com/vllm-project/vllm/blob/main/vllm/distributed/kv_transfer/kv_connector/utils.py" target="_blank">vLLM 源码</a>、<a href="https://huggingface.co/blog/hmellor/vllm-pr48250-transformers-mla" target="_blank">HF 说明</a>）；GQA 为 F=max(1, TP/KV头数)；hybrid 因模型表缺层比例，暂按 1 计并标注口径待定。</li>
 <li><b>分层命中拆分</b>：按「容量 ÷ 写入速率」算每层保留时间 R；复用按「层」两段近似——<b>HBM+L2 命中</b>占比 w<sub>L</sub>、间隔 T<sub>L</sub>，<b>KV 存储命中</b>占比 1−w<sub>L</sub>、间隔 T<sub>S</sub>，取 <b>p = w<sub>L</sub>·(1−e^(−R/T<sub>L</sub>)) + (1−w<sub>L</sub>)·(1−e^(−R/T<sub>S</sub>))</b>；HBM 份额 = h·p<sub>HBM</sub>，L2 份额 = h·(p<sub>L2</sub>−p<sub>HBM</sub>)，存储份额 = h·(p<sub>存储</sub>−p<sub>L2</sub>)。</li>
 <li><b>use</b> = 命中不重算的比例（历史前缀 ÷ 前缀合计）；③ 的存储读回只对「只有存储留得住」的那部分计，HBM/L2 命中不占设备带宽。</li>
 <li><b>写入</b> = 新增前缀 + 本轮 decode 增量；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底；<b>保留窗口</b> = 现有容量 ÷ 写入速率（派生值）。</li>
