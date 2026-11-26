@@ -122,7 +122,7 @@ details.assume ul b{color:var(--sub)}
 <body>
 <main>
 <div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.3</span></div>
-<p class="subline">按物理规格推算 · 左栏为参数；右侧三栏依次为「完全重算」「HBM+L2 缓存」「HBM+L2+KV 存储」，同一套算法</p>
+<p class="subline">按物理规格推算 · 左栏为参数；右侧三栏依次为「HBM 缓存」「HBM+L2 缓存」「HBM+L2+KV 存储」，同一套算法</p>
 
 <div class="layout">
   <aside>
@@ -206,13 +206,13 @@ details.assume ul b{color:var(--sub)}
 
 <details class="assume"><summary>计算口径与假设</summary>
 <ul>
-<li><b>① 完全重算</b>：每个请求前缀<b>全部重算</b>（prefill 按整段前缀），在途 KV 常驻 HBM；不落盘，无容量/寿命指标。</li>
+<li><b>① HBM 缓存</b>：HBM 前缀缓存始终存在（APC），命中不重算；无 L2、无存储，其余未命中按完整前缀重算。</li>
 <li><b>② HBM+L2</b>：HBM（GPU 显存）与 L2（每节点 DRAM，输入 TB/节点）先承接复用；命中不重算，未命中按完整前缀重算。无存储设备。</li>
 <li><b>③ HBM+L2+KV 存储</b>：在②之上加存储，只有 HBM/L2 都留不住的前缀才从设备读回；写入 = 未命中新前缀 + 输出增量。</li>
 <li><b>分层命中拆分</b>：按「容量 ÷ 写入速率」算每层保留时间 R；复用按「层」两段近似——<b>HBM+L2 命中</b>占比 w<sub>L</sub>、间隔 T<sub>L</sub>，<b>KV 存储命中</b>占比 1−w<sub>L</sub>、间隔 T<sub>S</sub>，取 <b>p = w<sub>L</sub>·(1−e^(−R/T<sub>L</sub>)) + (1−w<sub>L</sub>)·(1−e^(−R/T<sub>S</sub>))</b>；HBM 份额 = h·p<sub>HBM</sub>，L2 份额 = h·(p<sub>L2</sub>−p<sub>HBM</sub>)，存储份额 = h·(p<sub>存储</sub>−p<sub>L2</sub>)。</li>
 <li><b>use</b> = 命中不重算的比例（历史前缀 ÷ 前缀合计）；③ 的存储读回只对「只有存储留得住」的那部分计，HBM/L2 命中不占设备带宽。</li>
 <li><b>写入</b> = 新增前缀 + 本轮 decode 增量；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底；<b>保留窗口</b> = 现有容量 ÷ 写入速率（派生值）。</li>
-<li><b>选型次序</b>：先满足 TTFT 目标，再取有效供给（supply ÷ 形状惩罚）最大的实例组合；若无组合达标，退回吞吐最高并显式提示。</li>
+<li><b>选型次序</b>：三场景各自重选 P/D 配比（加入新硬件后配比变化是工程常态）；先满足 TTFT 目标，再取有效供给（supply ÷ 形状惩罚）最大的实例组合。</li>
 <li>读写共用设备总带宽（= 单设备带宽×台数），λ 受 <b>(存储读回 + 写入)</b> 合计流量与合计 IOPS 约束；块 128 KB；未建模元数据/EC 与回读尾延迟（延迟只影响 TTFT 判断）。</li>
 <li><b>λ 是饱和上限</b>（零排队稳态点），不是可售配额；它未计突发与故障切换，商用容量建议再乘 0.6–0.8 的利用率系数。</li>
 <li><b>MoE 的 decode 权重读</b>按「专家并集」近似：每步权重 ≈ W·(1−(1−A/W)^B)，dense 模型（A≈W）退化为全权重；真实路由偏斜会让并集更快饱和，因此 MoE 的 D 池能力仍可能偏乐观。</li>
@@ -581,7 +581,7 @@ function evalTier(b,sc,withStore,l2tb,mode){
     out=evalScene(b,Object.assign({},sc,{forceUse:use,devShare:(mode==="store"&&sh)?sh.hS:0}),withStore);
     if(!out.ok) return out;
     sh=tierShares(b,out,l2tb);
-    const nx=(mode==="none")?0:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL);
+    const nx=(mode==="none")?0:(mode==="hbm"?sh.hH:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL));
     const clamped=Math.min(b.use,Math.max(0,nx));
     if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
     use=clamped;
@@ -594,7 +594,7 @@ function evalMixedTier(b,sc,withStore,l2tb,mode){
     out=evalMixed(b,Object.assign({},sc,{forceUse:use,devShare:(mode==="store"&&sh)?sh.hS:0}),withStore);
     if(!out.ok) return out;
     sh=tierShares(b,out,l2tb);
-    const nx=(mode==="none")?0:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL);
+    const nx=(mode==="none")?0:(mode==="hbm"?sh.hH:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL));
     const clamped=Math.min(b.use,Math.max(0,nx));
     if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
     use=clamped;
@@ -604,9 +604,9 @@ function evalMixedTier(b,sc,withStore,l2tb,mode){
 
 function outTable(res,withStore,note,scNote,mode){
   const md=mode||(withStore?"store":"none");
-  const NUM={none:"一",tier:"二",store:"三"}[md];
-  const title={none:"无 KV 缓存存储",tier:"HBM+L2 缓存",store:"HBM+L2 缓存 + KV 存储"}[md];
-  const sub={none:"前缀全部重算",tier:"HBM/L2 命中不重算",store:"前缀命中不重算"}[md];
+  const NUM={hbm:"一",tier:"二",store:"三"}[md];
+  const title={hbm:"HBM 缓存",tier:"HBM+L2 缓存",store:"HBM+L2 缓存 + KV 存储"}[md];
+  const sub={hbm:"HBM 命中不重算",tier:"HBM/L2 命中不重算",store:"前缀命中不重算"}[md];
   if(!res.ok) return '<div class="res-h"><h2>'+NUM+'、'+title+'</h2><span class="tag">'+sub+'</span></div><p class="bad" style="font-weight:700;margin-top:8px">当前规格无法部署：权重装不下，或没有合法 TP×PP 组合。</p>';
   const s=res.best;
   const s2=s;
@@ -634,6 +634,10 @@ function outTable(res,withStore,note,scNote,mode){
     })():'');
   const rows=[];
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
+  if(md==="hbm"){ const t=res.tiers||{};
+    rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
+    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/池 · "+fmt((t.RH||0)/60,1)+" min（按层双桶折算）"]);
+  }
   if(md==="tier"){ const t=res.tiers||{};
     rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ L2 "+(100*(t.hL||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
     rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/池 · "+fmt((t.RH||0)/60,1)+" min（按双桶复用折算）"]);
@@ -676,6 +680,7 @@ function outTable(res,withStore,note,scNote,mode){
   }
   const tier=res.tiers||{};
  let h='<div class="res-h"><h2>'+NUM+'、'+title+'</h2><span class="tag">'+sub+'</span>'+
+   (md==="hbm"?'<span class="tag">HBM 命中 '+(100*(tier.hH||0)).toFixed(1)+'%</span>':'')+
    (md==="tier"?'<span class="tag">HBM+L2 命中 '+(100*res.use).toFixed(1)+'%（其中 L2 '+(100*(tier.hL||0)).toFixed(1)+'%）</span>':'')+
    (md==="store"?'<span class="tag">命中 '+(100*res.use).toFixed(1)+'%</span><span class="tag">HBM+L2 '+(100*((tier.hH||0)+(tier.hL||0))).toFixed(1)+'% · 存储 '+(100*(tier.hS||0)).toFixed(1)+'%</span>':'')+'</div>';
   h+=kpi;
@@ -710,12 +715,12 @@ function outTable(res,withStore,note,scNote,mode){
   h+=tb(g.perf);
   if(g.store.length) h+='<div class="ogt">'+(withStore?"存储":"负载")+'</div>'+tb(g.store);
   if(g.more.length) h+='<details class="more"><summary>更多指标</summary>'+tb(g.more)+'</details>';
-  if(md==="none") h+='<p class="hint" style="margin-top:8px">本场景不落盘：容量/寿命/设备台数不适用；「KV 产生速率」是若必须落盘时需要接住的量。</p>';
+  if(md==="hbm") h+='<p class="hint" style="margin-top:8px">本场景只有 HBM 前缀缓存（HBM 始终存在）：无 L2、无存储；容量/寿命/设备台数不适用。</p>';
   if(md==="tier") h+='<p class="hint" style="margin-top:8px">本场景无存储设备：HBM/L2 命中不重算，未命中按完整 prefill 重算；容量/寿命/设备台数不适用。</p>';
   return h;
 }
 
-function compare(A,C,B,note,noCache){
+function compare(A,C,B,Z,note,noCache){
   const box=$("cmp");
   if(!A.ok||!C.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
   const pct=(x,y)=>y>0?100*(x/y-1):NaN;
@@ -726,7 +731,7 @@ function compare(A,C,B,note,noCache){
   const cell=(d)=>'<td style="font-weight:700;color:'+(d>=0?"#1a7f37":"var(--bad)")+'">'+pc(d)+'</td>';
   const pdCell=(x)=>x.best&&x.best.nP!=null?(x.best.nP+" / "+x.best.nD):"混部";
   box.innerHTML='<h2>收益对比</h2>'+
-   '<table class="cmp-tb"><tr><th>指标</th><th>① 完全重算</th><th>② HBM+L2</th><th>③ +KV 存储</th><th>③/①</th><th>③/②</th></tr>'+
+   '<table class="cmp-tb"><tr><th>指标</th><th>① HBM（始终）</th><th>② HBM+L2</th><th>③ +KV 存储</th><th>③/①</th><th>③/②</th></tr>'+
    '<tr><td>到达率 λ（req/s）</td><td>'+fmt(A.lam)+'</td><td>'+fmt(C.lam)+'</td><td>'+fmt(B.lam)+'</td>'+cell(d1)+cell(d2)+'</tr>'+
    '<tr><td>并发上限（条）</td><td>'+fmt(A.capAll)+'</td><td>'+fmt(C.capAll)+'</td><td>'+fmt(B.capAll)+'</td>'+cell(c1)+cell(c2)+'</tr>'+
    '<tr><td>token 吞吐（tok/s）</td><td>'+fmt(A.tokps)+'</td><td>'+fmt(C.tokps)+'</td><td>'+fmt(B.tokps)+'</td>'+cell(t1)+cell(t2)+'</tr>'+
@@ -735,12 +740,13 @@ function compare(A,C,B,note,noCache){
    (B.totBW>0?'<tr><td>容量 / 台数</td><td>–</td><td>–</td><td>'+humanGB(B.capFinal)+' · 需 '+B.devsNeed+' 台</td><td>–</td><td>–</td></tr>':'')+
    '</table><div class="note-box"><b>存储净收益（③ vs ①）</b>：到达率 '+pc(d1)+'、并发 '+pc(c1)+'。'+
    '<br><b>存储边际收益（③ vs ②）</b>：到达率 '+pc(d2)+'、并发 '+pc(c2)+'。'+
+   (Z&&Z.ok?'<br><span class="hint">参照：若连 HBM 前缀缓存也没有（完全重算）= '+fmt(Z.lam)+' req/s，③ 相对它 '+(Z.lam>0?((B.lam/Z.lam-1)*100>=0?"+":"")+((B.lam/Z.lam-1)*100).toFixed(1)+"%":"–")+'。</span>':'')+
    (noCache?'<br>没有可用的前缀缓存：②③ 退化为 ①。':'')+
    (note?'<br><span class="hint">'+note+'</span>':'')+'</div>';
 }
 
 /* ---------- 主流程 ---------- */
-let LAST_A=null, LAST_B=null, LAST_C=null;
+let LAST_A=null, LAST_B=null, LAST_C=null, LAST_Z=null;
 
 /* ---------- 主流程 ---------- */
 function recalc(){
@@ -766,24 +772,25 @@ function recalc(){
   const sc0={store:false,devBW:0,devIOPS:0,blk};
   const scS={store:hasDev,devBW:tot,devIOPS:iops,blk};
   if(pdOK){
-    A=evalTier(b,sc0,false,b.l2tb,"none");
+    A=evalTier(b,sc0,false,b.l2tb,"hbm");
     C=evalTier(b,sc0,false,b.l2tb,"tier");
-    B=hasDev?evalTier(b,scS,hasDev,b.l2tb,"store"):evalTier(b,sc0,false,b.l2tb,"none");
+    B=hasDev?evalTier(b,scS,hasDev,b.l2tb,"store"):evalTier(b,sc0,false,b.l2tb,"hbm");
     if(!A.ok||!C.ok||!B.ok) pdOK=false;
   }
   if(!pdOK){                                                    // 节点不足以拆分 P/D 池 → 回退混部
     note="节点数不足以拆分 P/D 池（需 ≥2 节点），已按混部实例计算。";
-    A=evalMixedTier(b,sc0,false,b.l2tb,"none");
+    A=evalMixedTier(b,sc0,false,b.l2tb,"hbm");
     C=evalMixedTier(b,sc0,false,b.l2tb,"tier");
-    B=hasDev?evalMixedTier(b,scS,hasDev,b.l2tb,"store"):evalMixedTier(b,sc0,false,b.l2tb,"none");
+    B=hasDev?evalMixedTier(b,scS,hasDev,b.l2tb,"store"):evalMixedTier(b,sc0,false,b.l2tb,"hbm");
   }
   if(b.use<=0 && B && B.ok && String(B.best.bnd||"").startsWith("设备")) note+="缓存仍需吸收全部前缀写入，λ 受设备带宽（读+写）约束。";
-  LAST_A=A; LAST_C=C; LAST_B=B;
-  $("a_out").innerHTML=outTable(A,false,"",false,"none");
+  const Z = pdOK ? evalTier(b,sc0,false,b.l2tb,"none") : evalMixedTier(b,sc0,false,b.l2tb,"none");
+  LAST_A=A; LAST_C=C; LAST_B=B; LAST_Z=Z;
+  $("a_out").innerHTML=outTable(A,false,"",false,"hbm");
   $("c_out").innerHTML=outTable(C,false,"",false,"tier");
   $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note,"store")
     :('<div class="res-h"><h2>三、HBM+L2 缓存 + KV 存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
-  compare(A,C,B,note,(b.use<=0||!hasDev));
+  compare(A,C,B,Z,note,(b.use<=0||!hasDev));
 }
 
 /* ---------- 初始化 ---------- */
