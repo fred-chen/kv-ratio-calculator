@@ -512,7 +512,7 @@ function evalMixed(b,sc,withStore){
   }
   if(!best) return {ok:false,pd:false};
   const lam=best.lam, outKV=nout*b.sTok, perReqWrite=(1-use)*S_pfx+outKV;
-  const wrRead=lam*use*S_pfx, wrMiss=lam*perReqWrite;
+  const wrRead=lam*readPerReq, wrMiss=lam*perReqWrite;
   const tRead=(use>0&&totBW>0)?readPerReq*best.k/Math.max(1,totBW-wrMiss):0;
   const daily=(withStore?wrMiss:lam*(S_pfx+outKV))*86400*b.w;
   const wcap=elife*daily/(dwpd*DWPD_YEARS), capFinal=wcap;
@@ -546,7 +546,7 @@ function evalScene(b,sc,withStore){
   const use=best.use;
   const outKV=b.nout*b.sTok;                                     // 本轮 decode 增量 KV（GB）
   const perReqWrite=(1-use)*b.S_pfx+outKV;                       // 每请求新增落盘：新前缀 + 输出增量
-  const wrRead=lam*use*b.S_pfx;                                  // 设备读回 GB/s
+  const wrRead=lam*best.readPerReq;                                // 设备读回 GB/s（只按存储份额）
   const wrMiss=lam*perReqWrite;                                  // 写入 GB/s（含 decode 增量）
   const daily=(withStore?wrMiss:lam*(b.S_pfx+outKV))*86400*b.w;
   const wcap=elife*daily/(dwpd*DWPD_YEARS);      // 满足期望寿命所需的最小容量
@@ -589,11 +589,11 @@ function tierShares(b,res,l2tb){
     const ph=1-Math.exp(-R/th), pc=1-Math.exp(-R/tc);
     return Math.min(1,Math.max(0,wh*ph+wc*pc));
   };
-  const pH=pOf(RH), pL=pOf(RL), pS=res.effWinHave>0?pOf(res.effWinHave*3600):0;   // effWinHave 单位为小时
+  const pH=Math.min(1,pOf(RH)), pL=Math.min(1,pOf(RL)), pS=res.effWinHave>0?Math.min(1,pOf(res.effWinHave*3600)):0;   // effWinHave 单位为小时
   const h=Math.min(1,Math.max(0,b.use||0));
-  const hH=h*Math.min(1,pH);
-  const hL=h*Math.max(0,Math.min(1,pL)-Math.min(1,pH));
-  const hS=h*Math.max(0,Math.min(1,pS)-Math.min(1,pL));
+  const hH=h*pH;
+  const hL=h*Math.max(0,pL-pH);
+  const hS=h*Math.max(0,pS-Math.max(pH,pL));
   return {hH,hL,hS,pH,pL,pS,RH,RL,capH,capL,slots};
 }
 function evalTier(b,sc,withStore,l2tb,mode){
