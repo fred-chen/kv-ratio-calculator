@@ -121,7 +121,7 @@ details.assume ul b{color:var(--sub)}
 </head>
 <body>
 <main>
-<div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.3</span></div>
+<div class="top"><h1>有无 KV 缓存存储 · 服务能力对比计算器</h1><span class="ver">v2.4</span></div>
 <p class="subline">按物理规格推算 · 左栏为参数；右侧三栏依次为「HBM 缓存」「HBM+L2 缓存」「HBM+L2+KV 存储」，同一套算法</p>
 
 <div class="layout">
@@ -221,6 +221,8 @@ details.assume ul b{color:var(--sub)}
 <li><b>① HBM 缓存</b>：HBM 前缀缓存始终存在（APC），命中不重算；无 L2、无存储，其余未命中按完整前缀重算。</li>
 <li><b>② HBM+L2</b>：HBM（GPU 显存）与 L2（每节点 DRAM，输入 TB/节点）先承接复用；命中不重算，未命中按完整前缀重算。无存储设备。</li>
 <li><b>③ HBM+L2+KV 存储</b>：在②之上加存储，只有 HBM/L2 都留不住的前缀才从设备读回；写入 = 未命中新前缀 + 输出增量。</li>
+<li><b>缓存容量归属</b>：HBM 前缀缓存按 <b>P 池</b>可用显存计（P 实例的总 HBM 0.9 − k×权重），L2 按 P 池节点的 host DRAM 计；②③ 各自重选 P/D，因此缓存容量随配比变化。</li>
+<li><b>KV 复制因子</b>：MLA 为每 TP rank 全量复制（F=TP）；GQA 为 F=max(1, TP/KV头数)（TP≤头数时按头切分、TP>头数时复制）；hybrid 因模型表缺层比例，暂按 1 计并标注口径待定。</li>
 <li><b>分层命中拆分</b>：按「容量 ÷ 写入速率」算每层保留时间 R；复用按「层」两段近似——<b>HBM+L2 命中</b>占比 w<sub>L</sub>、间隔 T<sub>L</sub>，<b>KV 存储命中</b>占比 1−w<sub>L</sub>、间隔 T<sub>S</sub>，取 <b>p = w<sub>L</sub>·(1−e^(−R/T<sub>L</sub>)) + (1−w<sub>L</sub>)·(1−e^(−R/T<sub>S</sub>))</b>；HBM 份额 = h·p<sub>HBM</sub>，L2 份额 = h·(p<sub>L2</sub>−p<sub>HBM</sub>)，存储份额 = h·(p<sub>存储</sub>−p<sub>L2</sub>)。</li>
 <li><b>use</b> = 命中不重算的比例（历史前缀 ÷ 前缀合计）；③ 的存储读回只对「只有存储留得住」的那部分计，HBM/L2 命中不占设备带宽。</li>
 <li><b>写入</b> = 新增前缀 + 本轮 decode 增量；<b>容量</b> = 按期待寿命与 DWPD 反推的磨损保底；<b>保留窗口</b> = 现有容量 ÷ 写入速率（派生值）。</li>
@@ -250,7 +252,7 @@ function legalGrids(m,g,s){
   const key=m.n+"|"+g+"|"+s+"|"+nvDomain(); const hit=GCACHE.get(key); if(hit) return hit;
   // TP 上限 = 1 个 NV 域（256 卡）；同时至少允许 2 台机（max(16,g)）
   const kvHeads=Math.max(1,m.nkv||1), tpMax=Math.max(16,g,nvDomain()), N=s*g, out=[];   // TP ≤ 1 个 NV 域（256 卡）
-  for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:(m.cls==="mla"?1:(t<=kvHeads?1/t:1))}); }
+  for(let t=1;t<=Math.min(m.nq,N);t++){ if(m.nq%t||m.dm%t||N%t) continue; if(m.L%(N/t)===0) out.push({tp:t,pp:N/t,rep:(m.cls==="mla"?t:(m.cls==="hybrid"?1:Math.max(1,t/kvHeads)))}); }
   if(!out.length) return out;
   const pref=out.filter(x=>x.tp<=tpMax), pool=(pref.length?pref:out.slice());
   pool.sort((a,b)=>{const xa=a.tp<=g,xb=b.tp<=g; if(xa!==xb)return xa?-1:1; return xa?b.tp-a.tp:a.tp-b.tp;});
@@ -388,7 +390,7 @@ function modelSync(){
   const m=MODELS[+$("model").value];
   if(!BW_LOCK) $("bw").value=m.wdt==="bf16"?"2":m.wdt==="fp8"?"1":"0.5";
   if(!BK_LOCK) $("bk").value=m.wdt==="bf16"?"2":"1";
-  $("modelhint").textContent=(m.cls||"")+" · 最大上下文 "+(m.ctx||0).toLocaleString()+" · 激活参数 ~"+m.P+"B · 原生权重 "+String(m.wdt||"").toUpperCase();
+  $("modelhint").textContent=(m.cls||"")+" · 最大上下文 "+(m.ctx||0).toLocaleString()+" · 激活参数 ~"+m.P+"B · 原生权重 "+String(m.wdt||"").toUpperCase()+(m.cls==="hybrid"?" · hybrid 复制口径待定（暂按 1）":"");
   pfSync();
 }
 
@@ -573,14 +575,14 @@ const PCIE_BW=128;   // GB/s/节点，PCIe Gen6 x16 单向基准（L2 读回带�
 /* ---------- 分层：HBM / L2 / 存储 命中拆分 ---------- */
 function tierShares(b,res,l2tb){
   const isMix=res.pd===false;
-  const inst=isMix?res.inst:(res.best&&res.best.dP);
+  const inst=isMix?res.inst:(res.best&&res.best.pP);          // 前缀缓存服务 prefill → 挂 P 池
   if(!inst) return {hH:0,hL:0,hS:0,pH:0,pL:0,pS:0,RH:0,RL:0,capH:0,capL:0,slots:0};
   const rep=isMix?((inst.g&&inst.g.rep)||1):(inst.rep||1);
-  const slots=Math.max(0,isMix?inst.perMem:inst.memMax);
-  const capH=slots*rep*b.S;                                   // GB / 整个 D 池
+  const capH=Math.max(0, (inst.used||inst.s*inst.k||0)*b.g*b.hbm*0.9 - (inst.k||1)*b.W);  // GB / 整个 P 池（扣权重）
+  const slots=rep>0?capH/(rep*b.S):0;
   const wrPool=Math.max(1e-9,res.wrMiss);
   const RH=capH/wrPool;
-  const capL=Math.max(0,l2tb||0)*1000*Math.max(1,b.nodes||inst.used||1);  // GB / 整集群（所有节点都有 L2）
+  const capL=Math.max(0,l2tb||0)*1000*Math.max(1,inst.used||inst.s*inst.k||1);  // GB / P 池节点的 host DRAM
   const RL=capL/wrPool;
   const wh=Math.min(1,Math.max(0,b.hw!=null?b.hw:0.95)), wc=1-wh;
   const th=Math.max(1,b.ht||300), tc=Math.max(1,b.ct||10800);
@@ -604,7 +606,7 @@ function evalTier(b,sc,withStore,l2tb,mode){
     sh=tierShares(b,out,l2tb);
     const nx=(mode==="none")?0:(mode==="hbm"?sh.hH:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL));
     const clamped=Math.min(b.use,Math.max(0,nx));
-    if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
+    if(i>=1 && Math.abs(clamped-use)<1e-4){ use=clamped; break; }
     use=clamped;
   }
   out.tiers=sh; out.useMode=mode; return out;
@@ -617,7 +619,7 @@ function evalMixedTier(b,sc,withStore,l2tb,mode){
     sh=tierShares(b,out,l2tb);
     const nx=(mode==="none")?0:(mode==="hbm"?sh.hH:((mode==="store")?sh.hH+sh.hL+sh.hS:sh.hH+sh.hL));
     const clamped=Math.min(b.use,Math.max(0,nx));
-    if(Math.abs(clamped-use)<1e-4){ use=clamped; break; }
+    if(i>=1 && Math.abs(clamped-use)<1e-4){ use=clamped; break; }
     use=clamped;
   }
   out.tiers=sh; out.useMode=mode; return out;
@@ -657,12 +659,12 @@ function outTable(res,withStore,note,scNote,mode){
   rows.push(["上下文分段","历史 "+(res.hist||0).toLocaleString()+" ｜ 新增 "+(res.fresh||0).toLocaleString()+" ｜ 输出 "+(res.nout||0).toLocaleString()]);
   if(md==="hbm"){ const t=res.tiers||{};
     rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
-    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/池 · "+fmt((t.RH||0)/60,1)+" min（按层双桶折算）"]);
+    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/P 池 · "+fmt((t.RH||0)/60,1)+" min（按层双桶折算）"]);
   }
   if(md==="tier"){ const t=res.tiers||{};
     rows.push(["命中拆分","HBM "+(100*(t.hH||0)).toFixed(1)+"% ｜ L2 "+(100*(t.hL||0)).toFixed(1)+"% ｜ 未命中 "+(100*(1-(res.use||0))).toFixed(1)+"%"]);
-    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/池 · "+fmt((t.RH||0)/60,1)+" min（按双桶复用折算）"]);
-    if((res.l2tb||0)>0) rows.push(["L2 可驻留 / 保留","约 "+fmt(t.capL||0)+" GB/集群 · "+fmt((t.RL||0)/60,1)+" min（"+(res.l2tb)+" TB/节点）"]);
+    rows.push(["HBM 可驻留 / 保留","约 "+fmt(t.capH||0)+" GB/P 池 · "+fmt((t.RH||0)/60,1)+" min（按双桶复用折算）"]);
+    if((res.l2tb||0)>0) rows.push(["L2 可驻留 / 保留","约 "+fmt(t.capL||0)+" GB/P 池 · "+fmt((t.RL||0)/60,1)+" min（"+(res.l2tb)+" TB/节点）"]);
   }
   if(res.pd===false){
     const I=res.inst, gG='TP'+I.g.tp+'×PP'+I.g.pp;
