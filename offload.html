@@ -222,6 +222,7 @@ details.assume ul b{color:var(--sub)}
 <li><b>② HBM+L2</b>：HBM（GPU 显存）与 L2（每节点 DRAM，输入 TB/节点）先承接复用；命中不重算，未命中按完整前缀重算。无存储设备。</li>
 <li><b>③ HBM+L2+KV 存储</b>：在②之上加存储，只有 HBM/L2 都留不住的前缀才从设备读回；写入 = 未命中新前缀 + 输出增量。</li>
 <li><b>缓存容量归属</b>：HBM 前缀缓存按 <b>P 池</b>可用显存计（P 实例的总 HBM 0.9 − k×权重），L2 按 P 池节点的 host DRAM 计；②③ 各自重选 P/D，因此缓存容量随配比变化。</li>
+<li><b>部署建议</b>：按 HuggingFace config 的专家参数占比估算（GLM-5.3 路由专家约 98.7%），比较 TP+PP、DCP=4、DP+EP32/128 四种形态；DP+EP 按“注意力每卡复制、专家/EP 分散、KV 不复制”估算，未重新求解 P/D 配比，仅作选型方向。</li>
 <li><b>KV 复制因子</b>：MLA 的 <code>num_kv_heads=1</code>，TP>1 时 latent 在每个 rank 全量复制（F=TP）——vLLM 的 <code>is_kv_replicated</code> 即按“TP > KV 头数”判定，HuggingFace 的 MLA 部署说明也明确“TP replicates the latent cache on every rank”（<a href="https://github.com/vllm-project/vllm/blob/main/vllm/distributed/kv_transfer/kv_connector/utils.py" target="_blank">vLLM 源码</a>、<a href="https://huggingface.co/blog/hmellor/vllm-pr48250-transformers-mla" target="_blank">HF 说明</a>、<a href="https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/mem_cache/hybrid_cache/hybrid_cache_controller.py" target="_blank">SGLang 源码</a>）；GQA 为 F=max(1, TP/KV头数)；SGLang 同样注明 MLA KV 在 TP rank 间复制、HiCache 只在 TP0 写入（<a href="https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/mem_cache/mla_host_dedup.py" target="_blank">mla_host_dedup</a>）；若启用 DCP（Decode Context Parallelism），KV 按 DCP 大小条带化，等效 F=TP/DCP；hybrid 因模型表缺层比例，暂按 1 计并标注口径待定。</li>
 <li><b>分层命中拆分</b>：按「容量 ÷ 写入速率」算每层保留时间 R；复用按「层」两段近似——<b>HBM+L2 命中</b>占比 w<sub>L</sub>、间隔 T<sub>L</sub>，<b>KV 存储命中</b>占比 1−w<sub>L</sub>、间隔 T<sub>S</sub>，取 <b>p = w<sub>L</sub>·(1−e^(−R/T<sub>L</sub>)) + (1−w<sub>L</sub>)·(1−e^(−R/T<sub>S</sub>))</b>；HBM 份额 = h·p<sub>HBM</sub>，L2 份额 = h·(p<sub>L2</sub>−p<sub>HBM</sub>)，存储份额 = h·(p<sub>存储</sub>−p<sub>L2</sub>)。</li>
 <li><b>use</b> = 命中不重算的比例（历史前缀 ÷ 前缀合计）；③ 的存储读回只对「只有存储留得住」的那部分计，HBM/L2 命中不占设备带宽。</li>
@@ -331,7 +332,8 @@ function dAt(m,g,hbm,pf,tps,S,W,b,C,legal,bwH,A_GB,kappa){   // D 池：可服�
   }
   return best;
 }
-const MODELS = [{"n": "DeepSeek-V4-Flash", "id": "deepseek-ai/DeepSeek-V4-Flash", "cls": "mla", "L": 43, "Lf": 43, "Ll": 0, "nq": 64, "nkv": 1, "et": 2768, "es": 0, "idx": 672, "dkv": 576, "W": 290.9, "P": 17.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 3014656, "wsB": 1, "dm": 4096, "td": 64.4, "ctx": 1048576, "note": "官方交错池化：21 层 ratio=4 + 20 层 ratio=128 → 5.406 条×512/token；indexer 仅 r4 层 21 份×128；46 层滑窗 128×512（含 3 MTP，FP8）"}, {"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 1280, "es": 0, "idx": 320, "dkv": 576, "W": 763.2, "P": 20.8, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 2818048, "wsB": 1, "dm": 5120, "td": 32.0, "ctx": 1048576, "note": "官方共享池：KV 仅 4 源层按 1/2、1/2、1/2、1 池化 → 2.5 条×512/token；indexer 4 份×128 维共享；43 层滑窗 128×512（含 3 draft，FP8）"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "fp8", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "dkv": 1024, "W": 298.8, "P": 21, "Pe": false, "psrc": "模型卡 295B/A21B", "wdt": "bf16", "kvh": 8, "esB": 4, "ws": 0, "wsB": 1, "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 780.0, "P": 49, "Pe": false, "psrc": "模型卡 770B/A49B", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2779.9, "P": 104, "Pe": false, "psrc": "模型卡 Activated 104B", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "KDA 混合：24 MLA 全注意力(576/token)+69 KDA 线性（每层循环态 96×128×128+conv，共 116.2M 元素/序列，FP32）"}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2780.1, "P": 104, "Pe": false, "psrc": "模型卡（同 K3）", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "同 Kimi-K3（KDA 混合 24+69）"}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 11520, "es": 0, "idx": 0, "dkv": 768, "W": 310.8, "P": 16.0, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 12779520, "wsB": 0, "dm": 4096, "td": 240.0, "ctx": 1048576, "note": "混合滑窗 GQA：9 全层 + 39 窗口层(128×8头，每序列快照)"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 25600, "es": 0, "idx": 0, "dkv": 1536, "W": 1024.2, "P": 42.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 8, "esB": 4, "ws": 19660800, "wsB": 0, "dm": 6144, "td": 365.7, "ctx": 1048576, "note": "混合滑窗 GQA：10 全层 + 60 窗口层(128×8头，每序列快照)"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7296, "dkv": 512, "W": 427.0, "P": 23, "Pe": false, "psrc": "模型卡 ~428B/A23B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7680, "dkv": 512, "W": 220.5, "P": 12, "Pe": true, "psrc": "按 M3 比例估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "dkv": 1024, "W": 2446.2, "P": 95, "Pe": false, "psrc": "模型卡 A95B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性"}, {"n": "Qwen3.8-27B", "id": "Qwen/Qwen3.8-27B", "cls": "hybrid", "L": 64, "Lf": 16, "Ll": 48, "nq": 24, "nkv": 4, "et": 32768, "es": 38928384, "idx": 0, "dkv": 1024, "W": 27.8, "P": 27.3, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 5120, "td": 2048.0, "ctx": 262144, "note": "混合：16 全注意力 + 48 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 384, "dkv": 512, "W": 180.0, "P": 6, "Pe": false, "psrc": "模型卡 125B/A6B", "wdt": "bf16", "kvh": 2, "esB": 4, "ws": 0, "wsB": 1, "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}]
+const MODELS = [{"n": "DeepSeek-V4-Flash", "id": "deepseek-ai/DeepSeek-V4-Flash", "cls": "mla", "L": 43, "Lf": 43, "Ll": 0, "nq": 64, "nkv": 1, "et": 2768, "es": 0, "idx": 672, "dkv": 576, "W": 290.9, "P": 17.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 3014656, "wsB": 1, "dm": 4096, "td": 64.4, "ctx": 1048576, "note": "官方交错池化：21 层 ratio=4 + 20 层 ratio=128 → 5.406 条×512/token；indexer 仅 r4 层 21 份×128；46 层滑窗 128×512（含 3 MTP，FP8）"}, {"n": "DeepSeek-V4.1-Flash", "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017", "cls": "mla", "L": 40, "Lf": 40, "Ll": 0, "nq": 64, "nkv": 1, "et": 1280, "es": 0, "idx": 320, "dkv": 576, "W": 763.2, "P": 20.8, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 2818048, "wsB": 1, "dm": 5120, "td": 32.0, "ctx": 1048576, "note": "官方共享池：KV 仅 4 源层按 1/2、1/2、1/2、1 池化 → 2.5 条×512/token；indexer 4 份×128 维共享；43 层滑窗 128×512（含 3 draft，FP8）"}, {"n": "GLM-5.2", "id": "zai-org/GLM-5.2", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "GLM-5.3", "id": "zai-org/GLM-5.3", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 64, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 753.3, "P": 40.8, "Pe": true, "psrc": "config 估算", "wdt": "fp8", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78", "expF": 0.987}, {"n": "Hy3", "id": "tencent/Hy3", "cls": "gqa", "L": 80, "Lf": 80, "Ll": 0, "nq": 64, "nkv": 8, "et": 163840, "es": 0, "idx": 0, "dkv": 1024, "W": 298.8, "P": 21, "Pe": false, "psrc": "模型卡 295B/A21B", "wdt": "bf16", "kvh": 8, "esB": 4, "ws": 0, "wsB": 1, "dm": 4096, "td": 2048.0, "ctx": 262144, "note": "GQA"}, {"n": "Hy4-preview", "id": "tencent/Hy4-preview", "cls": "mla", "L": 78, "Lf": 78, "Ll": 0, "nq": 64, "nkv": 8, "et": 44928, "es": 0, "idx": 2688, "dkv": 576, "W": 780.0, "P": 49, "Pe": false, "psrc": "模型卡 770B/A49B", "wdt": "bf16", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 576.0, "ctx": 1048576, "note": "MLA×78"}, {"n": "Kimi-K3", "id": "moonshotai/Kimi-K3", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2779.9, "P": 104, "Pe": false, "psrc": "模型卡 Activated 104B", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "KDA 混合：24 MLA 全注意力(576/token)+69 KDA 线性（每层循环态 96×128×128+conv，共 116.2M 元素/序列，FP32）", "expF": 0.98}, {"n": "Kimi-K3.1-Pro", "id": "moonshotai/kimi-k3.1-pro", "cls": "hybrid", "L": 93, "Lf": 24, "Ll": 69, "nq": 96, "nkv": 96, "et": 13824, "es": 116158464, "idx": 0, "dkv": 576, "W": 2780.1, "P": 104, "Pe": false, "psrc": "模型卡（同 K3）", "wdt": "nvfp4", "kvh": 1, "esB": 4, "ws": 0, "wsB": 1, "dm": 7168, "td": 576.0, "ctx": 1048576, "note": "同 Kimi-K3（KDA 混合 24+69）", "expF": 0.98}, {"n": "MiMo-V2.6-Flash-RL", "id": "XiaomiMiMo/MiMo-V2.6-Flash-RL", "cls": "gqa", "L": 48, "Lf": 48, "Ll": 0, "nq": 64, "nkv": 4, "et": 11520, "es": 0, "idx": 0, "dkv": 768, "W": 310.8, "P": 16.0, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 12779520, "wsB": 0, "dm": 4096, "td": 240.0, "ctx": 1048576, "note": "混合滑窗 GQA：9 全层 + 39 窗口层(128×8头，每序列快照)"}, {"n": "MiMo-V2.6-Pro-RL", "id": "XiaomiMiMo/MiMo-V2.6-Pro-RL", "cls": "gqa", "L": 70, "Lf": 70, "Ll": 0, "nq": 128, "nkv": 8, "et": 25600, "es": 0, "idx": 0, "dkv": 1536, "W": 1024.2, "P": 42.1, "Pe": true, "psrc": "config 估算", "wdt": "nvfp4", "kvh": 8, "esB": 4, "ws": 19660800, "wsB": 0, "dm": 6144, "td": 365.7, "ctx": 1048576, "note": "混合滑窗 GQA：10 全层 + 60 窗口层(128×8头，每序列快照)"}, {"n": "MiniMax-M3", "id": "MiniMaxAI/MiniMax-M3", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7296, "dkv": 512, "W": 427.0, "P": 23, "Pe": false, "psrc": "模型卡 ~428B/A23B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "MiniMax-M3.1-Flash", "id": "MiniMaxAI/MiniMax-M3.1-Flash", "cls": "gqa", "L": 60, "Lf": 60, "Ll": 0, "nq": 64, "nkv": 4, "et": 61440, "es": 0, "idx": 7680, "dkv": 512, "W": 220.5, "P": 12, "Pe": true, "psrc": "按 M3 比例估算", "wdt": "nvfp4", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 6144, "td": 1024.0, "ctx": 1048576, "note": "GQA"}, {"n": "Qwen3.8-2.4T-A95B", "id": "Qwen/Qwen3.8-2.4T-A95B", "cls": "hybrid", "L": 92, "Lf": 23, "Ll": 69, "nq": 64, "nkv": 4, "et": 47104, "es": 149225472, "idx": 0, "dkv": 1024, "W": 2446.2, "P": 95, "Pe": false, "psrc": "模型卡 A95B", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 8192, "td": 2048.0, "ctx": 262144, "note": "混合：23 全注意力 + 69 线性", "expF": 0.99}, {"n": "Qwen3.8-27B", "id": "Qwen/Qwen3.8-27B", "cls": "hybrid", "L": 64, "Lf": 16, "Ll": 48, "nq": 24, "nkv": 4, "et": 32768, "es": 38928384, "idx": 0, "dkv": 1024, "W": 27.8, "P": 27.3, "Pe": true, "psrc": "config 估算", "wdt": "bf16", "kvh": 4, "esB": 4, "ws": 0, "wsB": 1, "dm": 5120, "td": 2048.0, "ctx": 262144, "note": "混合：16 全注意力 + 48 线性"}, {"n": "Qwen3.8-Flash-Next", "id": "Qwen/Qwen3.8-Flash-Next", "cls": "hybrid", "L": 48, "Lf": 12, "Ll": 36, "nq": 24, "nkv": 2, "et": 12288, "es": 29196288, "idx": 384, "dkv": 512, "W": 180.0, "P": 6, "Pe": false, "psrc": "模型卡 125B/A6B", "wdt": "bf16", "kvh": 2, "esB": 4, "ws": 0, "wsB": 1, "dm": 2560, "td": 1024.0, "ctx": 262144, "note": "混合：12 全注意力 + 36 线性（含 indexer，已计）"}];
+
 const GPUS=[
  ["自定义（手动输入）",null,null,null,"默认 BF16 稠密 0.7 PF · 144 GB · 3.35 TB/s，可手动改。",3.35],
  ["NVIDIA A100 SXM 80G",null,0.312,80,"BF16/FP16 稠密 312 TF（Ampere 无 FP8 Tensor 核心）",2.0],
@@ -416,7 +418,7 @@ function readBase(){
   const ht=Math.max(1,(Number.isFinite(htRaw)&&htRaw>0?htRaw:300));      // 秒
   const ct=Math.max(1,(Number.isFinite(ctRaw)&&ctRaw>0?ctRaw:10800));    // 秒
   const use=prefix>0?Math.min(1,hist/prefix):0;                        // 历史前缀占比 = 命中率
-  return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,l2tb,hw,ht,ct,pd};
+  return {m,g,hbm,bwH,pf,nodes,prefix,hist,fresh,nout,tps,ttft,bw,bk,S,S_pfx,sTok,sState,fl,W,A_GB,legal,dwell,w,busyH,use,l2tb,hw,ht,ct,expF:(m.expF||0.95),pd};
 }
 
 /* ---------- 单场景：最大化 λ 的 P/D 划分 ---------- */
@@ -745,7 +747,40 @@ function outTable(res,withStore,note,scNote,mode){
   return h;
 }
 
-function compare(A,C,B,Z,note,noCache){
+function deployAdvice(b,B){
+  const cards=(b.nodes||0)*(b.g||8), W=b.W||0, S=b.S||1, tps=b.tps||80, dwell=B.dwell||1;
+  const expF=Math.min(0.999,Math.max(0,b.expF||0.95)), attnF=1-expF;
+  const pP=B.best&&B.best.pP; const Pcap=pP&&pP.used>0?pP.supplyEff*(b.nodes/pP.used):0;
+  const out=[];
+  out.push({n:"TP+PP（当前）",lam:B.lam,b:2,note:String(B.best.bnd||"")});
+  const dcp=4, dLam=Math.min(Pcap>0?Pcap:Infinity, B.lam*dcp)*0.85;
+  out.push({n:"DCP="+dcp+"（SGLang）",lam:dLam,b:2*wdcp(dcp),note:"KV 按 "+dcp+" 份条带化，含 all-to-all 惩罚 15%"});
+  [32,128].forEach(function(ep){
+    const rep=Math.max(1,Math.round(cards/ep));
+    const wGPU=W*attnF + W*expF/Math.max(1,ep);
+    const memStreams=cards*Math.max(0,(b.hbm||144)*0.9-wGPU)/S;
+    const budget=cards*(b.bwH||3.35)*1000/tps;
+    const weightStep=rep*W*expF + cards*W*attnF;
+    const bwStreams=Math.max(0,budget-weightStep)/(S);
+    const pen=(ep>=128?0.65:0.8);
+    const lam=Math.min(Pcap>0?Pcap:Infinity, memStreams/dwell, bwStreams/dwell)*pen;
+    out.push({n:"DP+EP"+ep,lam:lam,b:2*ep,note:"每卡权重 "+fmt(wGPU)+" GB（注意力复制 + 专家/"+ep+"）"});
+  });
+  out.sort((x,y)=>y.lam-x.lam);
+  out[0].best=1;
+  return out;
+}
+function wdcp(d){ return (d>=8?3:(d>=4?2:1)); }
+function deployHTML(b,B){
+  if(!b||B.pd===false||!b.expF) return "";
+  const a=deployAdvice(b,B);
+  let h='<div style="margin-top:10px;border-top:1px dashed var(--line);padding-top:8px"><b>部署方案建议（估算）</b><table class="cmp-tb" style="margin-top:6px"><tr><th>方案</th><th>估算 λ</th><th>说明</th></tr>';
+  a.forEach(r=>{ h+='<tr'+(r.best?' style="background:#f0fff4"':'')+'><td>'+(r.best?'✓ ':'')+r.n+'</td><td style="font-weight:700">'+fmt(r.lam)+'</td><td>'+r.note+'</td></tr>'; });
+  h+='</table><div class="hint" style="margin-top:6px">推荐 <b>'+a[0].n+'</b>：在 128 节点、当前模型/负载下估算 λ 最高。DCP 计入 15% all-to-all 开销；DP+EP 按“注意力每卡复制、专家/EP 分散”估算，未重新求解 P/D 配比，仅用于选型方向。</div></div>';
+  return h;
+}
+
+function compare(A,C,B,Z,note,noCache,b){
   const box=$("cmp");
   if(!A.ok||!C.ok||!B.ok){ box.innerHTML='<h2>收益对比</h2><p class="bad">至少一侧无法部署，无法给出收益。</p>'; return; }
   const pct=(x,y)=>y>0?100*(x/y-1):NaN;
@@ -768,7 +803,8 @@ function compare(A,C,B,Z,note,noCache){
    (Z&&Z.ok?'<br><span class="hint">参照：若连 HBM 前缀缓存也没有（完全重算）= '+fmt(Z.lam)+' req/s，③ 相对它 '+(Z.lam>0?((B.lam/Z.lam-1)*100>=0?"+":"")+((B.lam/Z.lam-1)*100).toFixed(1)+"%":"–")+'。</span>':'')+
    (MODELS[+$("model").value]&&MODELS[+$("model").value].cls==="hybrid"?'<br><span class="hint">当前模型为 hybrid：MLA/GQA 层比例未拆分，KV 复制因子暂按 1 计——②命中偏乐观、③/②边际偏保守。</span>':'')+
    (noCache?'<br>没有可用的前缀缓存：②③ 退化为 ①。':'')+
-   (note?'<br><span class="hint">'+note+'</span>':'')+'</div>';
+   (note?'<br><span class="hint">'+note+'</span>':'')+
+   deployHTML(b,B)+'</div>';
 }
 
 /* ---------- 主流程 ---------- */
@@ -818,7 +854,7 @@ function recalc(){
   $("c_out").innerHTML=outTable(C,false,"",false,"tier");
   $("b_out").innerHTML=hasDev?outTable(B,true,note,!!note,"store")
     :('<div class="res-h"><h2>三、HBM+L2 缓存 + KV 存储</h2><span class="tag">未配置设备</span></div><p class="hint" style="margin:10px 0">未配置 KV 缓存设备，B 退化为无存储计算（与 A 相同）。</p>'+outTable(B,false,"",false));
-  compare(A,C,B,Z,note,(b.use<=0||!hasDev));
+  compare(A,C,B,Z,note,(b.use<=0||!hasDev),b);
 }
 
 /* ---------- 初始化 ---------- */
